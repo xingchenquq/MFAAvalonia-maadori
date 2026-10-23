@@ -1,6 +1,10 @@
-﻿using Avalonia.Controls;
+﻿using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Documents;
+using Avalonia.Layout;
 using Avalonia.Controls.Notifications;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using MaaFramework.Binding;
 using MaaFramework.Binding.Buffers;
 using MaaFramework.Binding.Notification;
@@ -504,6 +508,10 @@ public class MaaProcessor
         // 这里只读取预加载数据的协议版本，不应用 Interface。
         // MaaProcessorManager 的 Lazy 构造完成后，LoadInstanceConfig 才会在主线程应用完整数据。
         IsV3 = GetPreloadedInterfaceVersion() >= 3;
+
+        // 成绩图监听循环：静态单例、应用生命周期常驻（幂等，重复调用只启动一次；
+        // 开关关闭时空转，仅每 3s 查一次开关与目录）。
+        StartResultImageWatchLoop();
     }
     private bool _isClosed = false;
     public bool IsClosed => _isClosed;
@@ -521,6 +529,8 @@ public class MaaProcessor
     public void Dispose()
     {
         _isClosed = true;
+        // 成绩图监听循环是静态单例、应用生命周期常驻，不随实例 Dispose 停止
+        //（其他实例可能仍在使用；停止反而会让最后一个实例 Dispose 后推送中断）。
         DetachScreenshotTasker(requireStopped: true);
         _detachedScreenshotCleanupCancellationTokenSource?.Cancel();
         _detachedScreenshotCleanupCancellationTokenSource?.Dispose();
@@ -1178,6 +1188,35 @@ public class MaaProcessor
     private bool _screencapAbortLogPending;
     private bool _screencapDisconnectedLogPending;
     private bool _screencapFailureLogged;
+
+    // 最近一次成功截图的 PNG 字节（通知附图用）。
+    // 任务结束后 controller 会被内核置为 inactive，届时无法再取图，只能靠这份缓存。
+    private byte[]? _lastNotificationImage;
+    private DateTime _lastNotificationImageAt = DateTime.MinValue;
+
+    // 画面缓存的最小更新间隔（毫秒）：避免任务运行期高频截图带来的拷贝与 GC 压力。
+    private const int NotificationImageCacheIntervalMs = 1500;
+
+    // 任务运行期主动刷新画面缓存的周期（毫秒）。见 StartNotificationImageCacheLoop 的说明。
+    private const int NotificationImageCacheLoopIntervalMs = 3000;
+
+    // 日志图片的取日志上限（远高于文字日志的 25 行 / 900 字，这正是转图片的意义所在）。
+    private const int NotificationLogImageMaxLines = 200;
+    private const int NotificationLogImageMaxChars = 30000;
+
+    // 成绩图监听循环（见 StartResultImageWatchLoop）。扫描间隔与画面缓存对齐即可。
+    // 静态单例：MaaProcessor 可能存在多个实例（多 instanceId），实例级循环会导致
+    // 同一张成绩图被每个实例各推送一次（2026-10-12 实测重复发送的根因）。
+    private const int ResultImageWatchIntervalMs = 3000;
+    private static CancellationTokenSource? _resultImageWatchCts;
+    private static bool _resultImageWatchStarted;
+
+    // 成绩图归档修剪：sent/、failed/ 中超过 7 天的文件删除，防本地存储无限增长
+    // （每曲 PNG 约 1-2MB，日积月累可观）。内部按 1 小时节流，删除失败仅记日志。
+    private const double ResultImageArchiveTtlDays = 7.0;
+    private static DateTime _resultImageArchiveNextPruneUtc = DateTime.MinValue;
+
+    private CancellationTokenSource? _imageCacheCts;
     private int _isConnecting;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private bool _suppressConnectionAttemptErrorToast;
@@ -1430,6 +1469,11 @@ public class MaaProcessor
                 return null;
             }
 
+            // 缓存最近一张成功画面（PNG 字节），供通知附图使用。
+            // 必须有缓存兜底：任务结束后 MaaFW 内核会立刻把 controller 置为 inactive，
+            // 此时再取图必然失败（详见 CaptureNotificationImage 的说明）。
+            UpdateNotificationImageCache(buffer);
+
             return buffer;
         }
         catch (Exception ex)
@@ -1437,6 +1481,56 @@ public class MaaProcessor
             LoggerHelper.Warning($"获取图像失败：{ex.Message}");
             buffer.Dispose();
             return null;
+        }
+    }
+
+    /// <summary>
+    /// 缓存最近一次成功截图的 PNG 字节，供任务结束/错误时的通知附图使用。
+    /// 失败静默忽略，绝不影响正常取图流程。
+    /// </summary>
+    /// <remarks>
+    /// 两处刻意的设计：
+    /// <list type="number">
+    /// <item><b>必须深拷贝</b>：<c>TryGetEncodedData</c> 的 <c>Stream</c>/<c>Span</c> 重载在官方 XML 文档中
+    /// 明确写着「避免在读取前 dispose buffer」，说明取到的是内部缓冲区视图；
+    /// 而调用方拿到 <c>GetImage</c> 的返回值后会立刻 <c>using</c> 释放。
+    /// 因此这里一律拷贝一份，避免缓存到失效/被复用的数据。</item>
+    /// <item><b>必须节流</b>：任务运行期每秒可能截图数次，若每张都拷贝 1MB+ 会造成不必要的
+    /// 内存分配与 GC 压力；通知只需要"当时的一张代表性画面"，按间隔节流即可。</item>
+    /// </list>
+    /// </remarks>
+    private void UpdateNotificationImageCache(MaaImageBuffer buffer)
+    {
+        try
+        {
+            if (buffer == null || buffer.IsInvalid || buffer.IsEmpty)
+                return;
+
+            // 节流（首次无条件缓存，否则短任务可能一张都留不下来）
+            if (_lastNotificationImage != null)
+            {
+                var elapsed = (DateTime.Now - _lastNotificationImageAt).TotalMilliseconds;
+                if (elapsed < NotificationImageCacheIntervalMs)
+                    return;
+            }
+
+            if (!buffer.TryGetEncodedData(out byte[] encoded) || encoded.Length == 0)
+                return;
+
+            // 深拷贝：不持有 buffer 内部缓冲区的引用
+            var copy = new byte[encoded.Length];
+            Array.Copy(encoded, copy, encoded.Length);
+
+            var isFirst = _lastNotificationImage == null;
+            _lastNotificationImage = copy;
+            _lastNotificationImageAt = DateTime.Now;
+
+            if (isFirst)
+                LoggerHelper.Info($"通知画面缓存已就绪：{copy.Length} 字节");
+        }
+        catch (Exception ex)
+        {
+            LoggerHelper.Debug($"通知画面缓存失败：{ex.Message}");
         }
     }
 
@@ -3428,6 +3522,7 @@ public class MaaProcessor
     {
         try
         {
+            StartNotificationImageCacheLoop();
             await StartTask(tasks, onlyStart, checkUpdate);
         }
         catch (OperationCanceledException)
@@ -3442,9 +3537,297 @@ public class MaaProcessor
         }
         finally
         {
+            StopNotificationImageCacheLoop();
             EndTaskRun();
         }
     }
+
+    /// <summary>
+    /// 任务运行期**周期性**取图以刷新通知画面缓存。
+    /// </summary>
+    /// <remarks>
+    /// 为什么必须有这个循环：任务运行期的画面**不会**自动进缓存 ——
+    /// ① MAA 内核（tasker）为流水线识别所做的截图发生在 C++ 层，<b>不经过</b> C# 的
+    ///    <c>MaaProcessor.GetImage()</c>；
+    /// ② 实时画面定时器虽有周期性截图，但被 <c>IsLiveViewExpanded &amp;&amp; EnableLiveView</c>
+    ///    两个 UI 条件挡着，用户不展开实时画面面板就<b>一次都不会截</b>（实测日志已证实：
+    ///    缓存直到通知取图那一刻才首次就绪，与取图时间相差仅 1ms）。
+    /// 而任务结束后内核会立刻把 controller 置为 inactive，届时再取图必然失败。
+    /// 因此只能由这里在任务跑着的时候主动留存画面。
+    /// 开销可控：EmulatorExtras 单次截图仅 8~11ms，间隔 3s，且走独立截图 tasker，不干扰主任务。
+    /// </remarks>
+    private void StartNotificationImageCacheLoop()
+    {
+        StopNotificationImageCacheLoop();
+
+        var cts = new CancellationTokenSource();
+        _imageCacheCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested && !_isClosed)
+                {
+                    try
+                    {
+                        // 只在任务真正在跑时取图；用 test=false 避免触发额外重连干扰主流程
+                        if (MaaTasker?.IsRunning == true)
+                        {
+                            var controller = GetScreenshotController(false);
+                            if (controller is { IsConnected: true })
+                            {
+                                using var buffer = GetImage(controller, true);
+                                // GetImage 成功后会自动刷新缓存（内部调 UpdateNotificationImageCache）
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerHelper.Debug($"通知画面缓存循环取图失败：{ex.Message}");
+                    }
+
+                    try
+                    {
+                        await Task.Delay(NotificationImageCacheLoopIntervalMs, cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // 停止时 CTS 已被释放，安全退出，避免未观察异常。
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                // 由循环任务自己释放 CTS。Stop 中不再 Dispose，否则后台任务
+                // 在 Task.Delay(cts.Token) 处访问已释放的 Token 会抛出 ObjectDisposedException。
+                cts.Dispose();
+            }
+        }, cts.Token);
+    }
+
+    private void StopNotificationImageCacheLoop()
+    {
+        try
+        {
+            _imageCacheCts?.Cancel();
+        }
+        catch (Exception ex)
+        {
+            LoggerHelper.Debug($"停止通知画面缓存循环失败：{ex.Message}");
+        }
+        finally
+        {
+            // 不再在这里 Dispose：CTS 的释放交给循环任务的 finally。
+            _imageCacheCts = null;
+        }
+    }
+
+    #region 成绩图推送（Maadori 演出结算截图 → QQ 机器人）
+
+    /// <summary>
+    /// 成绩图监听循环：静态单例、幂等、应用生命周期常驻。每 3s 扫描一次
+    /// 「安装目录/debug/notify_images/」，把 Maadori 结算链写入的新成绩图推送到
+    /// QQ 机器人（文案 + 富媒体图片），成功后归档到 sent/，失败移入 failed/
+    /// （避免单张坏图每个周期无限重试刷日志）。
+    /// 单实例化是必须的：MaaProcessor 可能有多个实例，实例级循环会让同一张图
+    /// 被各实例各推一次（2026-10-12 重复推送实测根因）。
+    /// 受「演出结束后附带成绩图」开关（默认关）与 QQ 机器人启用/验证状态门控；
+    /// 开关关闭时每周期仅做布尔判断与目录存在性检查，无任何网络行为。
+    /// 目录约定两端一致：Maadori agent 以进程 cwd（== 安装目录）写入
+    /// debug/notify_images，这里用 AppContext.BaseDirectory 拼同一路径。
+    /// </summary>
+    private static void StartResultImageWatchLoop()
+    {
+        if (_resultImageWatchStarted)
+            return;
+        _resultImageWatchStarted = true;
+        var cts = new CancellationTokenSource();
+        _resultImageWatchCts = cts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        // 归档修剪与推送开关无关：sent/、failed/ 按 TTL 修剪，
+                        // 防止长期运行的本地存储无限增长。
+                        PruneResultImageArchives();
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerHelper.Debug($"成绩图归档修剪失败：{ex.Message}");
+                    }
+
+                    try
+                    {
+                        await ScanAndSendResultImagesAsync(cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerHelper.Debug($"成绩图扫描推送失败：{ex.Message}");
+                    }
+
+                    try
+                    {
+                        await Task.Delay(ResultImageWatchIntervalMs, cts.Token);
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (ObjectDisposedException) { break; }
+                }
+            }
+            finally
+            {
+                // 与画面缓存循环同法：CTS 由循环任务自己的 finally 释放。
+                cts.Dispose();
+            }
+        }, cts.Token);
+    }
+
+    /// <summary>
+    /// 修剪成绩图归档目录：删除 sent/、failed/ 中超过 ResultImageArchiveTtlDays
+    /// 的旧文件。与推送开关状态无关（开关关闭时归档不再增长，但历史归档仍需
+    /// 有机会清理）。内部小时级节流；单文件删除失败仅记日志、不中断。
+    /// </summary>
+    private static void PruneResultImageArchives()
+    {
+        var nowUtc = DateTime.UtcNow;
+        if (nowUtc < _resultImageArchiveNextPruneUtc)
+            return;
+        _resultImageArchiveNextPruneUtc = nowUtc.AddHours(1);
+
+        var dir = Path.Combine(AppContext.BaseDirectory, "debug", "notify_images");
+        if (!Directory.Exists(dir))
+            return;
+        var cutoff = nowUtc - TimeSpan.FromDays(ResultImageArchiveTtlDays);
+        var pruned = 0;
+        foreach (var sub in new[] { "sent", "failed" })
+        {
+            var subDir = Path.Combine(dir, sub);
+            if (!Directory.Exists(subDir))
+                continue;
+            foreach (var file in Directory.GetFiles(subDir))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoff)
+                    {
+                        File.Delete(file);
+                        pruned++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggerHelper.Debug($"成绩图归档修剪失败：{file} — {ex.Message}");
+                }
+            }
+        }
+        if (pruned > 0)
+            LoggerHelper.Info($"成绩图归档已修剪 {pruned} 个超过 {ResultImageArchiveTtlDays:0} 天的旧文件");
+    }
+
+    private static async Task ScanAndSendResultImagesAsync(CancellationToken ct)
+    {
+        var model = Instances.ExternalNotificationSettingsUserControlModel;
+        if (model == null || !model.QQBotSendResultImage)
+            return;
+        if (!model.QQBotVerified)
+            return;
+        if (!MFAAvalonia.ViewModels.UsersControls.Settings.ExternalNotificationSettingsUserControlModel
+                .EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.QQBotKey))
+            return;
+
+        var dir = Path.Combine(AppContext.BaseDirectory, "debug", "notify_images");
+        if (!Directory.Exists(dir))
+            return;
+
+        // 孤儿摘要清理：agent 先写 .png 后写 .json，推送周期可能夹在中间，
+        // 留下没有配对 png 的 .json——归档掉，避免堆积。
+        foreach (var orphanJson in Directory.GetFiles(dir, "*.json"))
+        {
+            var pngPath = Path.ChangeExtension(orphanJson, ".png");
+            if (!File.Exists(pngPath))
+            {
+                var sentDir = Path.Combine(dir, "sent");
+                Directory.CreateDirectory(sentDir);
+                File.Move(orphanJson, Path.Combine(sentDir, Path.GetFileName(orphanJson)), true);
+                LoggerHelper.Debug($"成绩图孤儿摘要已归档：{Path.GetFileName(orphanJson)}");
+            }
+        }
+
+        foreach (var png in Directory.GetFiles(dir, "*.png"))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var caption = "Maadori 演出成绩";
+                var jsonPath = Path.ChangeExtension(png, ".json");
+                if (File.Exists(jsonPath))
+                {
+                    var meta = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(jsonPath));
+                    if (meta != null && meta.TryGetValue("caption", out var c) && !string.IsNullOrWhiteSpace(c))
+                        caption = c;
+                }
+
+                var bytes = await File.ReadAllBytesAsync(png, ct);
+                if (bytes.Length == 0)
+                    continue;
+
+                var fileName = Path.GetFileName(png);
+                await ExternalNotificationHelper.QQBot.SendAsync(
+                    model.QQBotAppId, model.QQBotSecret, model.QQBotOpenId, caption, ct);
+                var imgOk = await ExternalNotificationHelper.QQBot.SendImageAsync(
+                    model.QQBotAppId, model.QQBotSecret, model.QQBotOpenId, bytes, fileName, ct);
+                if (!imgOk)
+                    throw new Exception("QQ 机器人图片发送未成功（详见日志）");
+
+                var sentDir = Path.Combine(dir, "sent");
+                Directory.CreateDirectory(sentDir);
+                File.Move(png, Path.Combine(sentDir, fileName), true);
+                if (File.Exists(jsonPath))
+                    File.Move(jsonPath, Path.Combine(sentDir, Path.GetFileName(jsonPath)), true);
+                LoggerHelper.Info($"成绩图已推送：{fileName}");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Warn($"成绩图推送失败，移入 failed/：{Path.GetFileName(png)} — {ex.Message}");
+                try
+                {
+                    var failedDir = Path.Combine(dir, "failed");
+                    Directory.CreateDirectory(failedDir);
+                    File.Move(png, Path.Combine(failedDir, Path.GetFileName(png)), true);
+                    var jsonPath = Path.ChangeExtension(png, ".json");
+                    if (File.Exists(jsonPath))
+                        File.Move(jsonPath, Path.Combine(failedDir, Path.GetFileName(jsonPath)), true);
+                }
+                catch (Exception moveEx)
+                {
+                    LoggerHelper.Debug($"成绩图移入 failed/ 失败：{moveEx.Message}");
+                }
+            }
+        }
+    }
+
+    #endregion
 
     private List<DragItemViewModel> FilterExecutableTasks(IEnumerable<DragItemViewModel>? source, bool ignoreCheckedState = false)
     {
@@ -3489,6 +3872,13 @@ public class MaaProcessor
         CancellationTokenSource = new CancellationTokenSource();
 
         _startTime = DateTime.Now;
+
+        if (!onlyStart)
+        {
+            // "任务开始"只推 QQ 机器人渠道；其它渠道保持原有行为（不发此事件）
+            ExternalNotificationHelper.ExternalNotificationAsync(
+                string.Empty, LangKeys.ExternalNotificationEventStarted, qqBotOnly: true);
+        }
 
         var token = CancellationTokenSource.Token;
 
@@ -4507,6 +4897,426 @@ public class MaaProcessor
         _tempTasks = [];
     }
 
+    /// <summary>
+    /// 任务结束/错误时截取当前画面，供通知附带截图。
+    /// 仅在 QQ 机器人渠道已启用、已验证且用户开启"附带截图"时才取图；失败返回 null，不影响通知。
+    /// </summary>
+    /// <remarks>
+    /// 取图顺序刻意设计为「**先用运行期缓存、再尝试实时截图**」：
+    /// 任务结束后 MaaFW 内核会**立刻把 controller 置为 inactive**（用户实测 maafw.log：
+    /// Tasker.Task.Succeeded 与 Controller.Action.{inactive} 相差 1ms），此后 `Screencap()`
+    /// 必然失败；而 `TryConnectForLiveViewAsync()` 是异步 fire-and-forget，
+    /// 固定的短等待根本不足以完成重连。因此必须优先取任务运行期缓存下来的那张画面。
+    /// </remarks>
+    private byte[]? CaptureNotificationImage()
+    {
+        try
+        {
+            var model = Instances.ExternalNotificationSettingsUserControlModel;
+            // 以下三个前置条件原先一律静默 return null，导致用户侧"没图"却无从自查，
+            // 现全部补上原因日志。
+            if (!model.QQBotSendImage)
+            {
+                LoggerHelper.Info("通知截图跳过：未开启「附带截图」选项");
+                return null;
+            }
+
+            if (!model.QQBotVerified)
+            {
+                LoggerHelper.Warn("通知截图跳过：QQ 机器人尚未完成绑定验证");
+                return null;
+            }
+
+            if (!MFAAvalonia.ViewModels.UsersControls.Settings.ExternalNotificationSettingsUserControlModel.EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.QQBotKey))
+            {
+                LoggerHelper.Info("通知截图跳过：QQ 机器人渠道未启用");
+                return null;
+            }
+
+            // ---- 1) 优先取运行期缓存（任务结束后的唯一可靠来源）----
+            var cached = _lastNotificationImage;
+            if (cached is { Length: > 0 })
+            {
+                LoggerHelper.Info($"通知截图使用运行期缓存：{cached.Length} 字节（截于 {_lastNotificationImageAt:HH:mm:ss}）");
+                return cached;
+            }
+
+            // ---- 2) 无缓存时退避重试实时截图 ----
+            // 必须用 MAA 原生编码（TryGetEncodedData 输出标准 PNG）：
+            // Avalonia Bitmap.Save 的输出格式不被 QQ 接受，实测合并时返回
+            // 850019「富媒体文件格式不支持」。
+            var delays = new[] { 300, 800, 1500, 2000 };
+            for (var attempt = 0; attempt < delays.Length + 1; attempt++)
+            {
+                var controller = GetScreenshotController(true);
+                if (controller != null && controller.IsConnected)
+                {
+                    using var buffer = GetImage(controller, ShouldScreencapForLiveView());
+                    if (buffer != null && !buffer.IsInvalid && !buffer.IsEmpty
+                        && buffer.TryGetEncodedData(out byte[] encodedBytes)
+                        && encodedBytes.Length > 0)
+                    {
+                        LoggerHelper.Info($"通知截图已生成：{encodedBytes.Length} 字节（第 {attempt + 1} 次尝试）");
+                        return encodedBytes;
+                    }
+                }
+
+                // 重连是异步触发的，退避等待的同时轮询连接状态，避免固定 sleep 后直取。
+                if (attempt < delays.Length)
+                    WaitForControllerReconnect(delays[attempt]);
+            }
+
+            LoggerHelper.Warn("通知截图失败：既无运行期缓存，实时取图也未成功（controller 可能已断开且未能在重试期内重连）");
+            return null;
+        }
+        catch (Exception e)
+        {
+            LoggerHelper.Warn($"通知截图失败: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 在给定上限内轮询等待截图 controller 重连成功，最多等待 totalMs 毫秒。
+    /// 返回 true 表示已连上（可立即重试取图），false 表示超时。
+    /// </summary>
+    private bool WaitForControllerReconnect(int totalMs)
+    {
+        const int step = 100;
+        var waited = 0;
+        while (waited < totalMs)
+        {
+            if (!_isClosed && GetScreenshotController(false) is { IsConnected: true })
+                return true;
+
+            Thread.Sleep(step);
+            waited += step;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 取最近若干条运行日志，供 QQ 通知附带；受"附带运行日志"开关控制。
+    /// 长度受限（QQ 文字消息不宜过长），失败返回空串，不影响通知。
+    /// </summary>
+    private string BuildRecentLogText(int maxLines = 25, int maxChars = 900)
+    {
+        try
+        {
+            if (!Instances.ExternalNotificationSettingsUserControlModel.QQBotSendLog)
+                return string.Empty;
+
+            return CollectRecentLogText(maxLines, maxChars);
+        }
+        catch (Exception e)
+        {
+            LoggerHelper.Warn($"通知日志提取失败: {e.Message}");
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 纯函数式地取最近若干条日志文本（**不含开关判断**），供文字日志与日志图片共用。
+    /// 文字日志受 900 字上限约束；日志图片则可取到远超此长度的内容。
+    /// </summary>
+    private string CollectRecentLogText(int maxLines, int maxChars)
+    {
+        try
+        {
+            var logs = LogItemViewModels;
+            if (logs == null || logs.Count == 0)
+                return string.Empty;
+
+            var take = Math.Min(maxLines, logs.Count);
+            var builder = new System.Text.StringBuilder();
+            for (var i = logs.Count - take; i < logs.Count; i++)
+            {
+                var line = logs[i]?.Content;
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+                builder.Append(line.Trim()).Append('\n');
+                if (builder.Length >= maxChars)
+                    break;
+            }
+
+            var text = builder.ToString().Trim();
+            if (text.Length > maxChars)
+                text = text[^maxChars..];
+            return text;
+        }
+        catch (Exception e)
+        {
+            LoggerHelper.Warn($"通知日志提取失败: {e.Message}");
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 把最近若干条运行日志**渲染成 PNG 图片**，供 QQ 通知发送。
+    /// 目的是规避文字消息的字数限制（文字日志被截到 900 字，图片可承载数千字）。
+    /// 受独立的"日志转为图片"开关控制（默认关闭），失败返回 null，不影响其它通知内容。
+    /// </summary>
+    /// <remarks>
+    /// 实现要点：
+    /// <list type="bullet">
+    /// <item>用 Avalonia 的 <see cref="FormattedText"/> 排版 —— 设置 <c>Constraint</c> 宽度后
+    /// 会**自动换行**，并可经 <c>Bounds.Height</c> 直接拿到排版后的实际高度，无需手写换行/分页。</item>
+    /// <item><see cref="RenderTargetBitmap"/> 必须在 **UI 线程**创建与绘制，
+    /// 故整体经 <see cref="DispatcherHelper.RunOnMainThread{T}"/> 调度（通知发送在后台线程）。</item>
+    /// <item>限制最大行数与最大高度，避免日志过多时生成超高图片。</item>
+    /// </list>
+    /// </remarks>
+    private byte[]? RenderLogImage()
+    {
+        try
+        {
+            var model = Instances.ExternalNotificationSettingsUserControlModel;
+            if (!model.QQBotLogAsImage)
+            {
+                LoggerHelper.Info("日志图片跳过：未开启「日志转为图片」选项");
+                return null;
+            }
+
+            if (!model.QQBotVerified)
+            {
+                LoggerHelper.Warn("日志图片跳过：QQ 机器人尚未完成绑定验证");
+                return null;
+            }
+
+            var entries = CollectRecentLogEntries(NotificationLogImageMaxLines);
+            if (entries.Count == 0)
+            {
+                LoggerHelper.Info("日志图片跳过：暂无可用的运行日志");
+                return null;
+            }
+
+            var title = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Maadori 运行日志";
+            var bytes = DispatcherHelper.RunOnMainThread(() => RenderLogEntriesToPng(title, entries));
+            if (bytes is { Length: > 0 })
+                LoggerHelper.Info($"日志图片已生成：{bytes.Length} 字节");
+            else
+                LoggerHelper.Warn("日志图片生成失败：渲染返回空");
+
+            return bytes;
+        }
+        catch (Exception e)
+        {
+            LoggerHelper.Warn($"日志图片生成失败: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 取最近若干条日志的**结构化条目**（时间 + 内容 + 原始颜色），供日志图片渲染使用。
+    /// 与 <see cref="CollectRecentLogText"/> 的区别：这里保留每条的时间戳与着色信息，
+    /// 因此日志图片能显示「每条日志的时间」，并按级别着色。
+    /// </summary>
+    private List<(string Time, string Content, IBrush Color)> CollectRecentLogEntries(int maxLines)
+    {
+        var result = new List<(string, string, IBrush)>();
+        try
+        {
+            var logs = LogItemViewModels;
+            if (logs == null || logs.Count == 0)
+                return result;
+
+            var take = Math.Min(maxLines, logs.Count);
+            for (var i = logs.Count - take; i < logs.Count; i++)
+            {
+                var item = logs[i];
+                if (item == null || string.IsNullOrWhiteSpace(item.Content))
+                    continue;
+                result.Add((
+                    string.IsNullOrWhiteSpace(item.Time) ? "" : item.Time.Trim(),
+                    item.Content.Trim(),
+                    item.Color ?? Brushes.Black));
+            }
+        }
+        catch (Exception e)
+        {
+            LoggerHelper.Warn($"日志条目提取失败: {e.Message}");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 用**控件渲染**把日志条目画成 PNG（白底、时间戳灰色、内容按原始级别着色）。
+    /// **必须在 UI 线程调用**。
+    /// </summary>
+    /// <remarks>
+    /// 之所以不用 <see cref="FormattedText"/> 而改用 <see cref="RenderTargetBitmap.Render(Avalonia.Visual)"/>：
+    /// 前者是**单色**一次性绘制（无法让时间戳与内容异色），后者可渲染整棵控件树，
+    /// 从而支持多色、行高、分隔线等排版。
+    /// 宽度按手机优先限定 640px；超出高度上限时**保留末尾**（最新日志才是排查关键），
+    /// 并在顶部标注「前部日志已省略」，而不是静默裁掉底部。
+    /// </remarks>
+    private static byte[]? RenderLogEntriesToPng(string title, List<(string Time, string Content, IBrush Color)> entries)
+    {
+        // 分辨率对齐主流手机屏宽（1080），使图片在 QQ 中 1:1 显示、字迹清晰；
+        // 之前用 640px 会被手机放大到屏宽而发糊，观感"很小很糊"。
+        const double imageWidth = 1080;
+        const double padding = 28;
+        const double fontSize = 18;
+        const double lineHeight = 28;
+        const double maxHeight = 12000;
+
+        var contentWidth = imageWidth - padding * 2;
+        var timeFont = new FontFamily("Consolas, Courier New, monospace");
+        var timeBrush = new SolidColorBrush(Color.FromRgb(0x78, 0x78, 0x78));
+        var defaultForeground = new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x1A));
+        var dividerBrush = new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0));
+        var noteBrush = new SolidColorBrush(Color.FromRgb(0xB0, 0x50, 0x00));
+        var zebraBrush = new SolidColorBrush(Color.FromRgb(0xF5, 0xF6, 0xF7));   // 斑马纹（隔行浅灰）
+        var errorBrush = new SolidColorBrush(Color.FromRgb(0xFD, 0xEC, 0xEA));   // 错误行浅红底
+        var watermarkBrush = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
+
+        // 亮度适配：深色主题下日志颜色可能是浅色，直接用在白底上会看不见 → 过亮则回退深灰
+        static IBrush AdaptForeground(IBrush brush, IBrush fallback)
+        {
+            if (brush is ISolidColorBrush solid)
+            {
+                var c = solid.Color;
+                var luma = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+                return luma > 170 ? fallback : brush;
+            }
+            return fallback;
+        }
+
+        // 偏红即视作错误/警告级别（用于整行高亮）
+        static bool IsErrorLike(IBrush brush)
+        {
+            if (brush is ISolidColorBrush s)
+            {
+                var c = s.Color;
+                return c.R > 140 && c.R > c.G + 40 && c.R > c.B + 40;
+            }
+            return false;
+        }
+
+        Control Build(IReadOnlyList<(string Time, string Content, IBrush Color)> list, string? note)
+        {
+            var body = new StackPanel { Spacing = 1, Width = contentWidth };
+            if (note != null)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = note,
+                    FontSize = fontSize - 2,
+                    Foreground = noteBrush,
+                    Margin = new Thickness(0, 0, 0, 6),
+                });
+            }
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                var e = list[i];
+                var isError = IsErrorLike(e.Color);
+
+                var line = new TextBlock
+                {
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = lineHeight,
+                    FontSize = fontSize,
+                    Foreground = defaultForeground,
+                };
+                if (!string.IsNullOrEmpty(e.Time))
+                {
+                    // 时间戳用等宽字体，使各行时间列天然对齐
+                    line.Inlines!.Add(new Run(e.Time + "  ")
+                    {
+                        Foreground = timeBrush,
+                        FontFamily = timeFont,
+                        FontSize = fontSize - 2,
+                    });
+                }
+                line.Inlines!.Add(new Run(e.Content) { Foreground = AdaptForeground(e.Color, defaultForeground) });
+
+                // 斑马纹与错误高亮：错误行优先于斑马纹
+                var rowBg = isError ? errorBrush : (i % 2 == 1 ? zebraBrush : null);
+                body.Children.Add(new Border
+                {
+                    Background = rowBg,
+                    Padding = new Thickness(6, 1, 6, 1),
+                    CornerRadius = new CornerRadius(3),
+                    Child = line,
+                });
+            }
+
+            var rootStack = new StackPanel();
+            rootStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = fontSize + 2,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = defaultForeground,
+                Margin = new Thickness(0, 0, 0, 6),
+            });
+            rootStack.Children.Add(new Border
+            {
+                Height = 1,
+                Background = dividerBrush,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            rootStack.Children.Add(body);
+            // 底部水印（右下角）
+            rootStack.Children.Add(new TextBlock
+            {
+                Text = "由 Maadori 发送",
+                FontSize = fontSize - 4,
+                Foreground = watermarkBrush,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 10, 2, 0),
+            });
+
+            return new Border
+            {
+                Background = Brushes.White,
+                Padding = new Thickness(padding),
+                Width = imageWidth,
+                Child = rootStack,
+            };
+        }
+
+        // 先按全部条目测量；超高则按比例保留末尾，最多迭代数次
+        var current = new List<(string Time, string Content, IBrush Color)>(entries);
+        string? note = null;
+        var control = Build(current, note);
+        control.Measure(new Size(imageWidth, double.PositiveInfinity));
+
+        for (var attempt = 0; attempt < 5
+             && control.DesiredSize.Height > maxHeight
+             && current.Count > 10; attempt++)
+        {
+            var ratio = (maxHeight - padding * 2) / Math.Max(control.DesiredSize.Height - padding * 2, 1);
+            var keep = Math.Max(10, (int)(current.Count * ratio) - 2);
+            current = current.Skip(current.Count - keep).ToList();
+            note = "……（前部日志已省略）";
+            control = Build(current, note);
+            control.Measure(new Size(imageWidth, double.PositiveInfinity));
+        }
+
+        control.Arrange(new Rect(control.DesiredSize));
+
+        var desired = control.DesiredSize;
+        if (double.IsNaN(desired.Height) || double.IsInfinity(desired.Height) || desired.Height <= 1)
+        {
+            LoggerHelper.Warn($"日志图片渲染异常：DesiredSize={desired}");
+            return null;
+        }
+
+        var height = Math.Min(desired.Height, maxHeight);
+        var pixelSize = new PixelSize((int)Math.Ceiling(imageWidth), (int)Math.Ceiling(height));
+
+        using var renderBitmap = new RenderTargetBitmap(pixelSize, new Vector(96, 96));
+        renderBitmap.Render(control);
+
+        using var memory = new MemoryStream();
+        renderBitmap.Save(memory);
+        return memory.ToArray();
+    }
+
     private void DisplayTaskCompletionMessage(MFATask.MFATaskStatus status, bool onlyStart = false,
         bool queueCompleted = false, Action? action = null)
     {
@@ -4521,9 +5331,16 @@ public class MaaProcessor
         {
             ToastHelper.Info(LangKeys.TaskFailed.ToLocalization());
             AddLogByKey(LangKeys.TaskFailed, (IBrush?)null);
-            ExternalNotificationHelper.ExternalNotificationAsync(Instances.ExternalNotificationSettingsUserControlModel.EnabledCustom
-                ? Instances.ExternalNotificationSettingsUserControlModel.CustomFailureText
-                : LangKeys.TaskFailed.ToLocalization());
+            ExternalNotificationHelper.ExternalNotificationAsync(
+                Instances.ExternalNotificationSettingsUserControlModel.EnabledCustom
+                    ? Instances.ExternalNotificationSettingsUserControlModel.CustomFailureText
+                    : LangKeys.TaskFailed.ToLocalization(),
+                LangKeys.ExternalNotificationEventError,
+                false,
+                CaptureNotificationImage(),
+                "maadori-error.png",
+                BuildRecentLogText(),
+                RenderLogImage());
 
             if (queueCompleted && !onlyStart)
                 HandleAfterTaskOperation();
@@ -4571,9 +5388,16 @@ public class MaaProcessor
             }
             if (!onlyStart)
             {
-                ExternalNotificationHelper.ExternalNotificationAsync(Instances.ExternalNotificationSettingsUserControlModel.EnabledCustom
-                    ? Instances.ExternalNotificationSettingsUserControlModel.CustomSuccessText
-                    : LangKeys.TaskAllCompleted.ToLocalization());
+                ExternalNotificationHelper.ExternalNotificationAsync(
+                    Instances.ExternalNotificationSettingsUserControlModel.EnabledCustom
+                        ? Instances.ExternalNotificationSettingsUserControlModel.CustomSuccessText
+                        : LangKeys.TaskAllCompleted.ToLocalization(),
+                    LangKeys.ExternalNotificationEventFinished,
+                    false,
+                    CaptureNotificationImage(),
+                    "maadori-done.png",
+                    BuildRecentLogText(),
+                    RenderLogImage());
                 HandleAfterTaskOperation();
             }
         }
@@ -4584,6 +5408,38 @@ public class MaaProcessor
     public void HandleAfterTaskOperation()
     {
         var afterTask = InstanceConfiguration.GetValue(ConfigurationKeys.AfterTask, "None");
+        if (afterTask == "None")
+        {
+            return;
+        }
+
+        // 「结束后操作延迟」：执行关闭/关机前等待，给外部通知（尤其富媒体图片上传，
+        // 走 QQ 沙箱网关需数秒）留出发送时间，避免进程退出把在途上传掐断。
+        // fire-and-forget：不阻塞 UI；白名单防止配置文件被手改出界外值。
+        var delaySeconds = InstanceConfiguration.GetValue(
+            ConfigurationKeys.AfterTaskDelaySeconds, 3, [0, 3, 5, 15, 30, 60]);
+        if (delaySeconds <= 0)
+        {
+            ExecuteAfterTaskOperation(afterTask);
+            return;
+        }
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                ExecuteAfterTaskOperation(afterTask);
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Error($"结束后操作执行失败：{ex.Message}");
+            }
+        });
+    }
+
+    private void ExecuteAfterTaskOperation(string afterTask)
+    {
         switch (afterTask)
         {
             case "CloseMFA":

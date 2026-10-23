@@ -84,6 +84,196 @@
                     <ToggleSwitch
                         Classes="Switch"
                         DockPanel.Dock="Right"
+                        IsChecked="{Binding QQBotEnabled}"
+                        VerticalAlignment="Top" />
+                    <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <TextBlock
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            Text="QQ 机器人"
+                            VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Text="{Binding QQBotStatusText}"
+                    VerticalAlignment="Center" />
+                <StackPanel Spacing="8" IsVisible="{Binding QQBotEnabled}">
+                    <DockPanel>
+                        <TextBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            Text="{Binding QQBotAppId}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotAppId}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotAppIdTip}}" />
+                    <DockPanel>
+                        <suki:PasswordBox Height="33"
+                                          DockPanel.Dock="Right"
+                                          HorizontalAlignment="Center"
+                                          Password="{Binding QQBotSecret}"
+                                          Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSecret}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSecretTip}}" />
+                    <DockPanel>
+                        <Button
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            Command="{Binding QQBotGetOpenIdCommand}"
+                            Content="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotGetOpenId}}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotOpenId}}"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                FontSize="12"
+                                Opacity="0.7"
+                                Text="{Binding QQBotOpenIdMasked}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotGetOpenIdTip}}" />
+                    <DockPanel>
+                        <Button
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            Command="{Binding QQBotSendCodeCommand}"
+                            Content="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendCode}}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotCodeInput}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <DockPanel>
+                        <TextBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            Text="{Binding QQBotVerifyCodeInput}"
+                            Width="215" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Button
+                                Command="{Binding QQBotConfirmCommand}"
+                                Content="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotConfirm}}" />
+                            <Button
+                                Command="{Binding QQBotUnbindCommand}"
+                                Content="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotUnbind}}" />
+                        </StackPanel>
+                    </DockPanel>
+                    <DockPanel>
+                        <CheckBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            IsChecked="{Binding QQBotSendImage}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendImage}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendImageTip}}" />
+                    <DockPanel>
+                        <CheckBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            IsChecked="{Binding QQBotSendResultImage}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendResultImage}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendResultImageTip}}" />
+                    <DockPanel>
+                        <CheckBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            IsChecked="{Binding QQBotSendLog}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendLog}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotSendLogTip}}" />
+                    <DockPanel>
+                        <CheckBox
+                            DockPanel.Dock="Right"
+                            HorizontalAlignment="Center"
+                            IsChecked="{Binding QQBotLogAsImage}"
+                            Width="215" />
+                        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="16"
+                                Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotLogAsImage}}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock
+                        FontSize="12"
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="{markup:I18n {x:Static helper:LangKeys.ExternalNotificationQQBotLogAsImageTip}}" />
+                    <TextBlock
+                        FontSize="12"
+                        TextWrapping="Wrap"
+                        Text="{Binding QQBotHint}" />
+                </StackPanel>
+            </StackPanel>
+        </suki:GlassCard>
+        <suki:GlassCard Padding="25,5,25,5">
+            <StackPanel Spacing="8">
+                <DockPanel>
+                    <ToggleSwitch
+                        Classes="Switch"
+                        DockPanel.Dock="Right"
                         IsChecked="{Binding DingTalkEnabled}"
                         VerticalAlignment="Top" />
                     <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">

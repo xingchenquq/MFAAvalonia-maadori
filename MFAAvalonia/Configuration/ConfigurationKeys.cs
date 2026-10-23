@@ -34,6 +34,7 @@ public static class ConfigurationKeys
 
     public const string BeforeTask = "BeforeTask";
     public const string AfterTask = "AfterTask";
+    public const string AfterTaskDelaySeconds = "AfterTaskDelaySeconds";
     public const string AutoMinimize = "AutoMinimize";
     public const string AutoHide = "AutoHide";
     public const string SoftwarePath = "SoftwarePath";
@@ -172,6 +173,16 @@ public static class ConfigurationKeys
     public const string ExternalNotificationEnableCustomMessage = "ExternalNotificationEnableCustomMessage";
     public const string ExternalNotificationCustomSuccessText = "ExternalNotificationCustomSuccessText";
     public const string ExternalNotificationCustomFailureText = "ExternalNotificationCustomFailureText";
+    public const string ExternalNotificationQQBotAppId = "ExternalNotificationQQBotAppId";
+    public const string ExternalNotificationQQBotSecret = "ExternalNotificationQQBotSecret";
+    public const string ExternalNotificationQQBotOpenId = "ExternalNotificationQQBotOpenId";
+    public const string ExternalNotificationQQBotVerified = "ExternalNotificationQQBotVerified";
+    public const string ExternalNotificationQQBotSendImage = "ExternalNotificationQQBotSendImage";
+    public const string ExternalNotificationQQBotSendLog = "ExternalNotificationQQBotSendLog";
+    // 把运行日志渲染成图片发送（规避文字消息的字数限制）
+    public const string ExternalNotificationQQBotLogAsImage = "ExternalNotificationQQBotLogAsImage";
+    // 演出结束后附带成绩图：监听 Maadori 写入的成绩图目录并经 QQ 机器人推送（默认关）
+    public const string ExternalNotificationQQBotSendResultImage = "ExternalNotificationQQBotSendResultImage";
 
     #endregion
 
@@ -224,6 +235,7 @@ public static class ConfigurationKeys
         ControllerOptionItems,
         BeforeTask,
         AfterTask,
+        AfterTaskDelaySeconds,
         SoftwarePath,
         WaitSoftwareTime,
         EmulatorConfig,

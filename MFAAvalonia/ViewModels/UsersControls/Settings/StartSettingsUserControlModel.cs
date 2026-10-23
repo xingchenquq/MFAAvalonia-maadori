@@ -175,6 +175,16 @@ public partial class StartSettingsUserControlModel : ViewModelBase
         ConfigurationManager.CurrentInstance.SetValue(ConfigurationKeys.AfterTask, value);
     }
 
+    public int[] AfterTaskDelayOptions => [0, 3, 5, 15, 30, 60];
+
+    [ObservableProperty] private int _afterTaskDelaySeconds = ConfigurationManager.CurrentInstance.GetValue(
+        ConfigurationKeys.AfterTaskDelaySeconds, 3, [0, 3, 5, 15, 30, 60]);
+
+    partial void OnAfterTaskDelaySecondsChanged(int value)
+    {
+        ConfigurationManager.CurrentInstance.SetValue(ConfigurationKeys.AfterTaskDelaySeconds, value);
+    }
+
     [RelayCommand]
     private void QuickSettings()
     {

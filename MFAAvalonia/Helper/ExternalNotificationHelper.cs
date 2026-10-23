@@ -5,6 +5,7 @@ using MFAAvalonia.ViewModels.UsersControls.Settings;
 using MFAAvalonia.Helper;
 using MimeKit;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -21,12 +22,24 @@ public static class ExternalNotificationHelper
 {
     #region 总调用入口
 
-    public async static Task ExternalNotificationAsync(string message, CancellationToken cancellationToken = default)
+    public async static Task ExternalNotificationAsync(
+        string message,
+        string? eventType = null,
+        bool qqBotOnly = false,
+        byte[]? imageBytes = null,
+        string? imageFileName = null,
+        string? logText = null,
+        byte[]? logImageBytes = null,
+        CancellationToken cancellationToken = default)
     {
         var enabledProviders = ExternalNotificationSettingsUserControlModel.EnabledExternalNotificationProviderList;
 
         foreach (var enabledProvider in enabledProviders)
         {
+            // qqBotOnly：像"任务开始"这类只在 QQ 机器人渠道推送的事件，跳过其它渠道
+            if (qqBotOnly && enabledProvider != Key.QQBotKey)
+                continue;
+
             switch (enabledProvider)
             {
                 case Key.DingTalkKey:
@@ -105,8 +118,69 @@ public static class ExternalNotificationHelper
                         cancellationToken
                     );
                     break;
+                case Key.QQBotKey:
+                    if (!Instances.ExternalNotificationSettingsUserControlModel.QQBotVerified)
+                    {
+                        LoggerHelper.Warning("QQ机器人：渠道尚未完成验证，跳过本次推送");
+                        break;
+                    }
+                    // QQ 机器人使用结构化文案；其它渠道沿用它自己的 message
+                    var qqBotContent = string.IsNullOrEmpty(eventType)
+                        ? message
+                        : BuildNotificationMessage(eventType);
+                    if (!string.IsNullOrWhiteSpace(logText))
+                        qqBotContent += "\n\n" + logText;
+                    await QQBot.SendAsync(
+                        Instances.ExternalNotificationSettingsUserControlModel.QQBotAppId,
+                        Instances.ExternalNotificationSettingsUserControlModel.QQBotSecret,
+                        Instances.ExternalNotificationSettingsUserControlModel.QQBotOpenId,
+                        qqBotContent,
+                        cancellationToken
+                    );
+                    // 可选附带截图（富媒体）；失败只记日志，不影响已发出的文字
+                    if (imageBytes is { Length: > 0 })
+                    {
+                        await QQBot.SendImageAsync(
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotAppId,
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotSecret,
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotOpenId,
+                            imageBytes,
+                            string.IsNullOrWhiteSpace(imageFileName) ? "maadori.png" : imageFileName,
+                            cancellationToken
+                        );
+                    }
+                    // 可选附带日志图片（富媒体）。与文字日志可共存：
+                    // 文字便于复制/搜索，图片用于承载超出文字上限的完整日志。
+                    if (logImageBytes is { Length: > 0 })
+                    {
+                        await QQBot.SendImageAsync(
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotAppId,
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotSecret,
+                            Instances.ExternalNotificationSettingsUserControlModel.QQBotOpenId,
+                            logImageBytes,
+                            "maadori-log.png",
+                            cancellationToken
+                        );
+                    }
+                    break;
             }
         }
+    }
+
+    #endregion
+
+    #region 文案构造
+
+    /// <summary>
+    /// 构造结构化通知文案：<c>[yyyy-MM-dd HH:mm] Maadori通知 · 事件类型</c>。
+    /// </summary>
+    /// <param name="eventType">事件类型的文案键（见 <see cref="LangKeys"/>）。</param>
+    /// <param name="extra">可选附加正文（例如用户自定义文案）；为空则只发标题行。</param>
+    public static string BuildNotificationMessage(string eventType, string? extra = null)
+    {
+        // 精确到秒：并发/重跑时便于区分同一分钟内的多条通知
+        var head = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]\n{LangKeys.ExternalNotificationSourceLabel.ToLocalization()} · {eventType.ToLocalization()}";
+        return string.IsNullOrWhiteSpace(extra) ? head : head + "\n" + extra;
     }
 
     #endregion
@@ -127,6 +201,7 @@ public static class ExternalNotificationHelper
         public const string SmtpKey = "SMTP"; // SMTP协议
         public const string ServerChanKey = "ServerChan"; // Server酱
         public const string CustomWebhookKey = "CustomWebhook"; // 通用Webhook
+        public const string QQBotKey = "QQBot"; // QQ开放平台机器人
 
         public static readonly IReadOnlyList<string> AllKeys =
         [
@@ -141,6 +216,7 @@ public static class ExternalNotificationHelper
             QmsgKey,
             ServerChanKey,
             CustomWebhookKey,
+            QQBotKey,
         ];
     }
 
@@ -926,6 +1002,312 @@ public static class ExternalNotificationHelper
             }
             return uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps;
         }
+    }
+
+    #endregion
+
+    #region QQ机器人通知
+
+    public static class QQBot
+    {
+        // 固定沙箱环境：免公网 IP 白名单，且已实测可送达真实 QQ
+        private const string ApiBase = "https://sandbox.api.sgroup.qq.com";
+        private const string TokenUrl = "https://bots.qq.com/app/getAppAccessToken";
+        private const int TimeoutSeconds = 10;
+        private static readonly TimeSpan MinInterval = TimeSpan.FromSeconds(1);
+
+        private static string _accessToken = string.Empty;
+        private static DateTime _tokenExpireAt = DateTime.MinValue;
+        private static DateTime _lastSentAt = DateTime.MinValue;
+        // 节流锁与 token 锁刻意分开，避免 401 刷新重试时互相等待
+        private static readonly SemaphoreSlim TokenLock = new(1, 1);
+        private static readonly SemaphoreSlim ThrottleLock = new(1, 1);
+
+        public static async Task<bool> SendAsync(string appId, string secret, string openId, string info, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(openId))
+            {
+                LoggerHelper.Error("QQ机器人凭据不完整，无法发送");
+                return false;
+            }
+
+            try
+            {
+                await ThrottleAsync(cancellationToken);
+
+                var payload = JsonConvert.SerializeObject(new { content = info, msg_type = 0 });
+                var url = $"{ApiBase}/v2/users/{openId}/messages";
+
+                var token = await GetAccessTokenAsync(appId, secret, false, cancellationToken);
+                var response = await PostAsync(url, payload, token, cancellationToken);
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    LoggerHelper.Info("QQ机器人收到 401，刷新 token 后重试一次");
+                    token = await GetAccessTokenAsync(appId, secret, true, cancellationToken);
+                    response = await PostAsync(url, payload, token, cancellationToken);
+                }
+
+                if (response.IsSuccessStatusCode)
+                {
+                    LoggerHelper.Info("QQ机器人消息发送成功");
+                    return true;
+                }
+
+                LoggerHelper.Error($"QQ机器人消息发送失败: {response.StatusCode} {response.Content}");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                LoggerHelper.Warning("QQ机器人消息发送已取消");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Error($"QQ机器人通信异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static async Task<HttpResponseMessage> PostAsync(string url, string payload, string token, CancellationToken cancellationToken)
+        {
+            using var client = VersionChecker.CreateHttpClientWithProxy();
+            client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("QQBot", token);
+            var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            return await client.PostAsync(url, content, cancellationToken);
+        }
+
+        private static async Task ThrottleAsync(CancellationToken cancellationToken)
+        {
+            await ThrottleLock.WaitAsync(cancellationToken);
+            try
+            {
+                var wait = MinInterval - (DateTime.UtcNow - _lastSentAt);
+                if (wait > TimeSpan.Zero)
+                    await Task.Delay(wait, cancellationToken);
+                _lastSentAt = DateTime.UtcNow;
+            }
+            finally
+            {
+                ThrottleLock.Release();
+            }
+        }
+
+        public static async Task<string> GetAccessTokenAsync(string appId, string secret, bool force, CancellationToken cancellationToken = default)
+        {
+            await TokenLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (!force && !string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _tokenExpireAt)
+                    return _accessToken;
+
+                using var client = VersionChecker.CreateHttpClientWithProxy();
+                client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);
+                var body = new StringContent(
+                    JsonConvert.SerializeObject(new { appId = appId, clientSecret = secret }),
+                    Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(TokenUrl, body, cancellationToken);
+                var text = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                    throw new Exception($"获取 access_token 失败: {response.StatusCode} {text}");
+
+                var data = JsonConvert.DeserializeObject<Dictionary<string, string>>(text) ?? new Dictionary<string, string>();
+                if (!data.TryGetValue("access_token", out var token) || string.IsNullOrWhiteSpace(token))
+                    throw new Exception("获取 access_token 失败: 响应缺少 access_token");
+
+                var expires = data.TryGetValue("expires_in", out var exp) && int.TryParse(exp, out var seconds) ? seconds : 7200;
+                _accessToken = token;
+                _tokenExpireAt = DateTime.UtcNow.AddSeconds(Math.Max(expires - 60, 30));
+                return token;
+            }
+            finally
+            {
+                TokenLock.Release();
+            }
+        }
+
+        // 校验凭据是否有效：能换到 access_token 即视为有效（平台没有更轻量的探测接口）
+        public static async Task<bool> ValidateAsync(string appId, string secret, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await GetAccessTokenAsync(appId, secret, true, cancellationToken);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Error($"QQ机器人凭据校验失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        // ---- 富媒体（图片）----
+
+        /// <summary>
+        /// 上传 PNG 并以富媒体消息（msg_type=7）发送。
+        /// 失败只记日志并返回 false，不影响已经发出的文字通知。
+        /// </summary>
+        public static async Task<bool> SendImageAsync(string appId, string secret, string openId, byte[] imageBytes, string fileName, CancellationToken cancellationToken = default)
+        {
+            if (imageBytes == null || imageBytes.Length == 0)
+            {
+                LoggerHelper.Warning("QQ机器人图片发送跳过：图片数据为空");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(openId))
+            {
+                LoggerHelper.Error("QQ机器人凭据不完整，无法发送图片");
+                return false;
+            }
+
+            try
+            {
+                await ThrottleAsync(cancellationToken);
+                var token = await GetAccessTokenAsync(appId, secret, false, cancellationToken);
+                var fileInfo = await UploadImageAsync(token, openId, imageBytes, fileName, cancellationToken);
+                if (string.IsNullOrWhiteSpace(fileInfo))
+                {
+                    LoggerHelper.Warning("QQ机器人图片上传失败：未获取到 file_info，放弃发送");
+                    return false;
+                }
+
+                var payload = JsonConvert.SerializeObject(new
+                {
+                    msg_type = 7,
+                    media = new { file_info = fileInfo },
+                });
+                var response = await PostAsync($"{ApiBase}/v2/users/{openId}/messages", payload, token, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    LoggerHelper.Info("QQ机器人图片发送成功");
+                    return true;
+                }
+
+                LoggerHelper.Error($"QQ机器人图片发送失败: {response.StatusCode} {response.Content}");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                LoggerHelper.Warning("QQ机器人图片发送已取消");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Error($"QQ机器人图片发送异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        // 官方未提供 base64 直传（只有 url / 分片上传两条路），本地截图必须走分片。
+        // 截图一般 < 5MB（= 默认 block_size），通常只有一个分片。
+    private static async Task<string?> UploadImageAsync(string token, string openId, byte[] data, string fileName, CancellationToken cancellationToken)
+    {
+        // 整体超时保护：沙箱/代理异常时，某一环（典型是 upload_prepare）可能长时间挂起，
+        // 导致图片发送永久卡死且没有任何日志，表现为「文字能收、图片静默消失」。
+        // 这里用 25s 硬超时确保快速失败，异常可被上层 SendImageAsync 捕获并记录。
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(25));
+        var ct = cts.Token;
+
+        const int Md5HeadSize = 10002432;
+
+        var md5 = Convert.ToHexString(MD5.HashData(data)).ToLowerInvariant();
+        var sha1 = Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
+        var headLength = Math.Min(data.Length, Md5HeadSize);
+        var md5Head = Convert.ToHexString(MD5.HashData(data.AsSpan(0, headLength))).ToLowerInvariant();
+
+        var prepareBody = JsonConvert.SerializeObject(new
+        {
+            file_type = 1,
+            file_size = data.Length.ToString(),
+            file_name = fileName,
+            md5,
+            sha1,
+            md5_10m = md5Head,
+        });
+        LoggerHelper.Info($"QQ机器人图片上传开始：{data.Length} 字节，文件={fileName}");
+        var prepareResp = await PostAsync($"{ApiBase}/v2/users/{openId}/upload_prepare", prepareBody, token, ct);
+        var prepareText = await prepareResp.Content.ReadAsStringAsync(ct);
+        if (!prepareResp.IsSuccessStatusCode)
+        {
+            LoggerHelper.Error($"QQ机器人预上传失败: {prepareResp.StatusCode} {prepareText}");
+            return null;
+        }
+
+        var prepare = JObject.Parse(prepareText);
+        var uploadId = prepare["upload_id"]?.ToString();
+        var parts = prepare["parts"] as JArray;
+        if (string.IsNullOrWhiteSpace(uploadId) || parts == null || parts.Count == 0)
+        {
+            LoggerHelper.Error($"QQ机器人预上传响应异常: {prepareText}");
+            return null;
+        }
+        LoggerHelper.Info($"QQ机器人图片预上传成功：upload_id={uploadId}，分片数={parts.Count}");
+
+        // 服务端返回的 parts[].index 从 1 开始（官方文档写的是从 0 开始，实测为 1），
+        // 所以偏移必须按分片顺序累积，绝不能用 index * block_size —— 否则首片偏移就越界，
+        // 上传的会是空数据，合并时返回 850019「富媒体文件格式不支持」。
+        var offset = 0L;
+        foreach (var part in parts)
+        {
+            var index = part["index"]?.Value<int>() ?? 0;
+            var presignedUrl = part["presigned_url"]?.ToString();
+            var blockSize = long.TryParse(part["block_size"]?.ToString(), out var bs) && bs > 0 ? bs : data.Length;
+            if (string.IsNullOrWhiteSpace(presignedUrl))
+                continue;
+
+            var length = (int)Math.Min(blockSize, Math.Max(data.Length - offset, 0));
+            var chunk = new byte[length];
+            Array.Copy(data, offset, chunk, 0, length);
+            offset += length;
+
+            using (var http = VersionChecker.CreateHttpClientWithProxy())
+            {
+                http.Timeout = TimeSpan.FromSeconds(60);
+                var putResp = await http.PutAsync(presignedUrl, new ByteArrayContent(chunk), ct);
+                if (!putResp.IsSuccessStatusCode)
+                {
+                    LoggerHelper.Error($"QQ机器人分片上传失败 part={index}: {putResp.StatusCode}");
+                    return null;
+                }
+            }
+
+            var partMd5 = Convert.ToHexString(MD5.HashData(chunk)).ToLowerInvariant();
+            var finishBody = JsonConvert.SerializeObject(new
+            {
+                upload_id = uploadId,
+                part_index = index,
+                block_size = blockSize.ToString(),
+                md5 = partMd5,
+            });
+            var finishResp = await PostAsync($"{ApiBase}/v2/users/{openId}/upload_part_finish", finishBody, token, ct);
+            if (!finishResp.IsSuccessStatusCode)
+            {
+                var finishText = await finishResp.Content.ReadAsStringAsync(ct);
+                LoggerHelper.Error($"QQ机器人分片确认失败 part={index}: {finishResp.StatusCode} {finishText}");
+                return null;
+            }
+        }
+        LoggerHelper.Info("QQ机器人图片分片上传完成，开始合并");
+
+        var mergeBody = JsonConvert.SerializeObject(new
+        {
+            upload_id = uploadId,
+            file_type = 1,
+            srv_send_msg = false,
+        });
+        var mergeResp = await PostAsync($"{ApiBase}/v2/users/{openId}/files", mergeBody, token, ct);
+        var mergeText = await mergeResp.Content.ReadAsStringAsync(ct);
+        if (!mergeResp.IsSuccessStatusCode)
+        {
+            LoggerHelper.Error($"QQ机器人上传合并失败: {mergeResp.StatusCode} {mergeText}");
+            return null;
+        }
+        LoggerHelper.Info("QQ机器人图片合并成功");
+
+        return JObject.Parse(mergeText)["file_info"]?.ToString();
+    }
     }
 
     #endregion

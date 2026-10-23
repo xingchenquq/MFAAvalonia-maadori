@@ -71,6 +71,9 @@
     <data name="AfterTaskOption" xml:space="preserve">
         <value>结束后操作</value>
     </data>
+    <data name="AfterTaskDelayOption" xml:space="preserve">
+        <value>结束后操作延迟（秒）</value>
+    </data>
     <data name="AllFilter" xml:space="preserve">
         <value>所有文件</value>
     </data>
@@ -1494,6 +1497,105 @@
     </data>
     <data name="ExternalNotificationLarkWebhookDescription" xml:space="preserve">
         <value>填写 Webhook 地址后，无需再填写飞书 ID 和 机器人令牌</value>
+    </data>
+    <data name="ExternalNotificationQQBotAppId" xml:space="preserve">
+        <value>机器人 AppID</value>
+    </data>
+    <data name="ExternalNotificationQQBotAppIdTip" xml:space="preserve">
+        <value>在 QQ 开放平台（q.qq.com）创建机器人后获取，不是你的 QQ 号码</value>
+    </data>
+    <data name="ExternalNotificationQQBotSecret" xml:space="preserve">
+        <value>机器人密钥</value>
+    </data>
+    <data name="ExternalNotificationQQBotSecretTip" xml:space="preserve">
+        <value>AppSecret，不是 QQ 登录密码，已在本机加密保存</value>
+    </data>
+    <data name="ExternalNotificationQQBotOpenId" xml:space="preserve">
+        <value>接收地址</value>
+    </data>
+    <data name="ExternalNotificationQQBotOpenIdEmpty" xml:space="preserve">
+        <value>尚未获取</value>
+    </data>
+    <data name="ExternalNotificationQQBotGetOpenId" xml:space="preserve">
+        <value>获取接收地址</value>
+    </data>
+    <data name="ExternalNotificationQQBotGetOpenIdTip" xml:space="preserve">
+        <value>请用你的 QQ 给机器人发送任意一条消息，然后点此获取</value>
+    </data>
+    <data name="ExternalNotificationQQBotCapturing" xml:space="preserve">
+        <value>正在等待你的消息…</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendCode" xml:space="preserve">
+        <value>发送验证码</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeSent" xml:space="preserve">
+        <value>已发送 6 位验证码，10 分钟内有效</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeInput" xml:space="preserve">
+        <value>验证码</value>
+    </data>
+    <data name="ExternalNotificationQQBotConfirm" xml:space="preserve">
+        <value>确认接入</value>
+    </data>
+    <data name="ExternalNotificationQQBotUnbind" xml:space="preserve">
+        <value>解绑</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusUnbound" xml:space="preserve">
+        <value>未绑定</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusPending" xml:space="preserve">
+        <value>待验证 · 暂不生效</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusReady" xml:space="preserve">
+        <value>已接入 · 可正常推送</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeMismatch" xml:space="preserve">
+        <value>验证码不正确或已过期</value>
+    </data>
+    <data name="ExternalNotificationQQBotNeedVerify" xml:space="preserve">
+        <value>请先完成验证</value>
+    </data>
+    <data name="ExternalNotificationQQBotCredentialInvalid" xml:space="preserve">
+        <value>AppID 或密钥不正确，请到 q.qq.com 核对</value>
+    </data>
+    <data name="ExternalNotificationQQBotCaptureTimeout" xml:space="preserve">
+        <value>未收到你的消息，请确认已用正确的 QQ 给机器人发过消息</value>
+    </data>
+    <data name="ExternalNotificationSourceLabel" xml:space="preserve">
+        <value>Maadori通知</value>
+    </data>
+    <data name="ExternalNotificationEventStarted" xml:space="preserve">
+        <value>任务开始</value>
+    </data>
+    <data name="ExternalNotificationEventFinished" xml:space="preserve">
+        <value>任务结束</value>
+    </data>
+    <data name="ExternalNotificationEventError" xml:space="preserve">
+        <value>任务错误</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendImage" xml:space="preserve">
+        <value>附带截图</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendImageTip" xml:space="preserve">
+        <value>任务结束 / 错误时，同时发送一张当时的画面截图</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendLog" xml:space="preserve">
+        <value>附带运行日志</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendLogTip" xml:space="preserve">
+        <value>任务结束 / 错误时，同时发送最近的运行日志</value>
+    </data>
+    <data name="ExternalNotificationQQBotLogAsImage" xml:space="preserve">
+        <value>日志转为图片</value>
+    </data>
+    <data name="ExternalNotificationQQBotLogAsImageTip" xml:space="preserve">
+        <value>任务结束 / 错误时，把运行日志渲染成一张图片发送（可承载更多内容，但无法复制文字）</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendResultImage" xml:space="preserve">
+        <value>演出结束后附带成绩图</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendResultImageTip" xml:space="preserve">
+        <value>每次演出结算后自动把成绩图通过 QQ 机器人推送（由 Maadori 上报成绩图；关闭时不监听）</value>
     </data>
     <data name="Unnamed" xml:space="preserve">
         <value>未命名</value>

@@ -63,6 +63,9 @@
     <data name="AfterTaskOption" xml:space="preserve">
         <value>Post-task Actions</value>
     </data>
+    <data name="AfterTaskDelayOption" xml:space="preserve">
+        <value>Post-task Action Delay (seconds)</value>
+    </data>
     <data name="AllFilter" xml:space="preserve">
         <value>All Files</value>
     </data>
@@ -1481,6 +1484,105 @@
     </data>
     <data name="ExternalNotificationLarkWebhookDescription" xml:space="preserve">
         <value>After filling in the Webhook address, you do not need to fill in the Lark ID and Bot Token</value>
+    </data>
+    <data name="ExternalNotificationQQBotAppId" xml:space="preserve">
+        <value>Bot AppID</value>
+    </data>
+    <data name="ExternalNotificationQQBotAppIdTip" xml:space="preserve">
+        <value>Get it after creating a bot at q.qq.com - not your QQ number</value>
+    </data>
+    <data name="ExternalNotificationQQBotSecret" xml:space="preserve">
+        <value>Bot secret</value>
+    </data>
+    <data name="ExternalNotificationQQBotSecretTip" xml:space="preserve">
+        <value>AppSecret, not your QQ password. Stored encrypted on this device</value>
+    </data>
+    <data name="ExternalNotificationQQBotOpenId" xml:space="preserve">
+        <value>Recipient</value>
+    </data>
+    <data name="ExternalNotificationQQBotOpenIdEmpty" xml:space="preserve">
+        <value>Not obtained yet</value>
+    </data>
+    <data name="ExternalNotificationQQBotGetOpenId" xml:space="preserve">
+        <value>Get recipient</value>
+    </data>
+    <data name="ExternalNotificationQQBotGetOpenIdTip" xml:space="preserve">
+        <value>Send any message to the bot from your QQ first, then click here</value>
+    </data>
+    <data name="ExternalNotificationQQBotCapturing" xml:space="preserve">
+        <value>Waiting for your message...</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendCode" xml:space="preserve">
+        <value>Send code</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeSent" xml:space="preserve">
+        <value>6-digit code sent, valid for 10 minutes</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeInput" xml:space="preserve">
+        <value>Verification code</value>
+    </data>
+    <data name="ExternalNotificationQQBotConfirm" xml:space="preserve">
+        <value>Confirm</value>
+    </data>
+    <data name="ExternalNotificationQQBotUnbind" xml:space="preserve">
+        <value>Unbind</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusUnbound" xml:space="preserve">
+        <value>Not bound</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusPending" xml:space="preserve">
+        <value>Pending - not active yet</value>
+    </data>
+    <data name="ExternalNotificationQQBotStatusReady" xml:space="preserve">
+        <value>Connected - notifications enabled</value>
+    </data>
+    <data name="ExternalNotificationQQBotCodeMismatch" xml:space="preserve">
+        <value>Code is incorrect or expired</value>
+    </data>
+    <data name="ExternalNotificationQQBotNeedVerify" xml:space="preserve">
+        <value>Complete verification first</value>
+    </data>
+    <data name="ExternalNotificationQQBotCredentialInvalid" xml:space="preserve">
+        <value>AppID or secret is incorrect, check it at q.qq.com</value>
+    </data>
+    <data name="ExternalNotificationQQBotCaptureTimeout" xml:space="preserve">
+        <value>No message received - make sure you messaged the bot from the correct QQ</value>
+    </data>
+    <data name="ExternalNotificationSourceLabel" xml:space="preserve">
+        <value>Maadori Notification</value>
+    </data>
+    <data name="ExternalNotificationEventStarted" xml:space="preserve">
+        <value>Task started</value>
+    </data>
+    <data name="ExternalNotificationEventFinished" xml:space="preserve">
+        <value>Task finished</value>
+    </data>
+    <data name="ExternalNotificationEventError" xml:space="preserve">
+        <value>Task error</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendImage" xml:space="preserve">
+        <value>Attach screenshot</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendImageTip" xml:space="preserve">
+        <value>Also send a screenshot of the screen when a task finishes or errors</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendLog" xml:space="preserve">
+        <value>Attach run log</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendLogTip" xml:space="preserve">
+        <value>Also send the most recent run log when a task finishes or errors</value>
+    </data>
+    <data name="ExternalNotificationQQBotLogAsImage" xml:space="preserve">
+        <value>Send log as image</value>
+    </data>
+    <data name="ExternalNotificationQQBotLogAsImageTip" xml:space="preserve">
+        <value>Render the runtime log as an image when a task finishes (holds more content, but the text cannot be copied)</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendResultImage" xml:space="preserve">
+        <value>Attach result image after each performance</value>
+    </data>
+    <data name="ExternalNotificationQQBotSendResultImageTip" xml:space="preserve">
+        <value>Automatically push the result screenshot via QQ bot after each performance (reported by Maadori; no monitoring when off)</value>
     </data>
     <data name="Unnamed" xml:space="preserve">
         <value>Unnamed</value>
