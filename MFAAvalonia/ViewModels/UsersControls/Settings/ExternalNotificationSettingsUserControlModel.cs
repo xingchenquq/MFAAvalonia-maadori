@@ -29,6 +29,12 @@ public partial class ExternalNotificationSettingsUserControlModel : ViewModelBas
 
     public static readonly List<LocalizationViewModel> ExternalNotificationProviders = ExternalNotificationHelper.Key.AllKeys.Select(k => new LocalizationViewModel(k)).ToList();
 
+    /// <summary>
+    /// 「QQ 机器人」卡片是否可见。Maaon / MaaEOV 等非 Maadori 品牌不展示该渠道，
+    /// 避免用户面对一个对本产品毫无意义的设置项。
+    /// </summary>
+    public bool QQBotCardVisible => BrandCapabilities.QqBotNotify;
+
     public void UpdateExternalNotificationProvider()
     {
         DingTalkEnabled = EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.DingTalkKey);
@@ -43,7 +49,7 @@ public partial class ExternalNotificationSettingsUserControlModel : ViewModelBas
         OnebotEnabled = EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.OneBotKey);
         ServerChanEnabled = EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.ServerChanKey);
         CustomWebhookEnabled = EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.CustomWebhookKey);
-        QQBotEnabled = EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.QQBotKey);
+        QQBotEnabled = BrandCapabilities.QqBotNotify && EnabledExternalNotificationProviderList.Contains(ExternalNotificationHelper.Key.QQBotKey);
     }
 
     public static readonly List<string> EnabledExternalNotificationProviderList = ExternalNotificationProviders

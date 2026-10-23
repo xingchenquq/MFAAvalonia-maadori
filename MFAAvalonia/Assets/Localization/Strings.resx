@@ -1561,9 +1561,6 @@
     <data name="ExternalNotificationQQBotCaptureTimeout" xml:space="preserve">
         <value>未收到你的消息，请确认已用正确的 QQ 给机器人发过消息</value>
     </data>
-    <data name="ExternalNotificationSourceLabel" xml:space="preserve">
-        <value>Maadori通知</value>
-    </data>
     <data name="ExternalNotificationEventStarted" xml:space="preserve">
         <value>任务开始</value>
     </data>
@@ -1595,7 +1592,7 @@
         <value>演出结束后附带成绩图</value>
     </data>
     <data name="ExternalNotificationQQBotSendResultImageTip" xml:space="preserve">
-        <value>每次演出结算后自动把成绩图通过 QQ 机器人推送（由 Maadori 上报成绩图；关闭时不监听）</value>
+        <value>每次演出结算后自动把成绩图通过 QQ 机器人推送（由 agent 上报；关闭时不监听）</value>
     </data>
     <data name="Unnamed" xml:space="preserve">
         <value>未命名</value>

@@ -1548,9 +1548,6 @@
     <data name="ExternalNotificationQQBotCaptureTimeout" xml:space="preserve">
         <value>No message received - make sure you messaged the bot from the correct QQ</value>
     </data>
-    <data name="ExternalNotificationSourceLabel" xml:space="preserve">
-        <value>Maadori Notification</value>
-    </data>
     <data name="ExternalNotificationEventStarted" xml:space="preserve">
         <value>Task started</value>
     </data>
@@ -1582,7 +1579,7 @@
         <value>Attach result image after each performance</value>
     </data>
     <data name="ExternalNotificationQQBotSendResultImageTip" xml:space="preserve">
-        <value>Automatically push the result screenshot via QQ bot after each performance (reported by Maadori; no monitoring when off)</value>
+        <value>Automatically push the result screenshot via QQ bot after each performance (reported by the agent; no monitoring when off)</value>
     </data>
     <data name="Unnamed" xml:space="preserve">
         <value>Unnamed</value>

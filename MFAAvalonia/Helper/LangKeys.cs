@@ -196,7 +196,6 @@ public static class LangKeys
 	public static readonly string ExternalNotificationQQBotSendResultImageTip = "ExternalNotificationQQBotSendResultImageTip";
 	public static readonly string ExternalNotificationQQBotLogAsImage = "ExternalNotificationQQBotLogAsImage";
 	public static readonly string ExternalNotificationQQBotLogAsImageTip = "ExternalNotificationQQBotLogAsImageTip";
-	public static readonly string ExternalNotificationSourceLabel = "ExternalNotificationSourceLabel";
 	public static readonly string ExternalNotificationEventStarted = "ExternalNotificationEventStarted";
 	public static readonly string ExternalNotificationEventFinished = "ExternalNotificationEventFinished";
 	public static readonly string ExternalNotificationEventError = "ExternalNotificationEventError";

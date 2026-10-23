@@ -1,6 +1,7 @@
 ﻿using MailKit.Net.Smtp;
 using MailKit.Security;
 using MFAAvalonia.Extensions;
+using MFAAvalonia.Extensions.MaaFW;
 using MFAAvalonia.ViewModels.UsersControls.Settings;
 using MFAAvalonia.Helper;
 using MimeKit;
@@ -119,6 +120,12 @@ public static class ExternalNotificationHelper
                     );
                     break;
                 case Key.QQBotKey:
+                    // 品牌能力兜底：非 Maadori 品牌即使历史配置里残留了 QQBotKey，也不推送
+                    if (!BrandCapabilities.QqBotNotify)
+                    {
+                        LoggerHelper.Warning("QQ机器人：当前品牌未启用该渠道，跳过本次推送");
+                        break;
+                    }
                     if (!Instances.ExternalNotificationSettingsUserControlModel.QQBotVerified)
                     {
                         LoggerHelper.Warning("QQ机器人：渠道尚未完成验证，跳过本次推送");
@@ -172,15 +179,34 @@ public static class ExternalNotificationHelper
     #region 文案构造
 
     /// <summary>
-    /// 构造结构化通知文案：<c>[yyyy-MM-dd HH:mm] Maadori通知 · 事件类型</c>。
+    /// 构造结构化通知文案：<c>[yyyy-MM-dd HH:mm:ss]</c> 换行 <c>品牌 · 事件类型</c>。
     /// </summary>
     /// <param name="eventType">事件类型的文案键（见 <see cref="LangKeys"/>）。</param>
     /// <param name="extra">可选附加正文（例如用户自定义文案）；为空则只发标题行。</param>
     public static string BuildNotificationMessage(string eventType, string? extra = null)
     {
         // 精确到秒：并发/重跑时便于区分同一分钟内的多条通知
-        var head = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]\n{LangKeys.ExternalNotificationSourceLabel.ToLocalization()} · {eventType.ToLocalization()}";
+        var head = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]\n{GetBrandLabel()} · {eventType.ToLocalization()}";
         return string.IsNullOrWhiteSpace(extra) ? head : head + "\n" + extra;
+    }
+
+    /// <summary>
+    /// 品牌名：取 <c>interface.json</c> 的 <c>label</c>（显示名），回退 <c>name</c>，再回退中性值。
+    /// </summary>
+    /// <remarks>
+    /// 品牌**不是**编译期常量：同一份源码要同时服务 Maadori / Maaon / MaaEOV。
+    /// 早期实现把「Maadori通知」写死在资源里，导致任何一个产品只要用这份 dll
+    /// 就会显示别人的品牌名。改为运行时读取后，各产品只需维护自己的 interface.json。
+    /// Interface 尚未加载时（极早期的通知）回退为 MFA，不会抛异常。
+    /// </remarks>
+    public static string GetBrandLabel()
+    {
+        var iface = MaaProcessor.Interface;
+        var label = iface?.Label;
+        if (!string.IsNullOrWhiteSpace(label))
+            return label!;
+        var name = iface?.Name;
+        return string.IsNullOrWhiteSpace(name) ? "MFA" : name!;
     }
 
     #endregion

@@ -78,7 +78,7 @@
                 </DockPanel>
             </StackPanel>
         </suki:GlassCard>
-        <suki:GlassCard Padding="25,5,25,5">
+        <suki:GlassCard Padding="25,5,25,5" IsVisible="{Binding QQBotCardVisible}">
             <StackPanel Spacing="8">
                 <DockPanel>
                     <ToggleSwitch

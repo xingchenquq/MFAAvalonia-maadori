@@ -3648,6 +3648,9 @@ public class MaaProcessor
     /// </summary>
     private static void StartResultImageWatchLoop()
     {
+        // 非 Maadori 品牌不启动成绩图监听：该能力依赖 agent 侧写入的目录约定
+        if (!BrandCapabilities.ResultImagePush)
+            return;
         if (_resultImageWatchStarted)
             return;
         _resultImageWatchStarted = true;
@@ -3775,7 +3778,7 @@ public class MaaProcessor
             ct.ThrowIfCancellationRequested();
             try
             {
-                var caption = "Maadori 演出成绩";
+                var caption = $"{ExternalNotificationHelper.GetBrandLabel()} 演出成绩";
                 var jsonPath = Path.ChangeExtension(png, ".json");
                 if (File.Exists(jsonPath))
                 {
@@ -5069,6 +5072,8 @@ public class MaaProcessor
     /// </remarks>
     private byte[]? RenderLogImage()
     {
+        if (!BrandCapabilities.LogImage)
+            return null;
         try
         {
             var model = Instances.ExternalNotificationSettingsUserControlModel;
@@ -5091,7 +5096,7 @@ public class MaaProcessor
                 return null;
             }
 
-            var title = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Maadori 运行日志";
+            var title = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ExternalNotificationHelper.GetBrandLabel()} 运行日志";
             var bytes = DispatcherHelper.RunOnMainThread(() => RenderLogEntriesToPng(title, entries));
             if (bytes is { Length: > 0 })
                 LoggerHelper.Info($"日志图片已生成：{bytes.Length} 字节");
@@ -5263,7 +5268,7 @@ public class MaaProcessor
             // 底部水印（右下角）
             rootStack.Children.Add(new TextBlock
             {
-                Text = "由 Maadori 发送",
+                Text = $"由 {ExternalNotificationHelper.GetBrandLabel()} 发送",
                 FontSize = fontSize - 4,
                 Foreground = watermarkBrush,
                 HorizontalAlignment = HorizontalAlignment.Right,
