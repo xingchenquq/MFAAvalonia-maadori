@@ -8,7 +8,16 @@
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <Platforms>x64</Platforms>
         <ApplicationManifest>app.manifest</ApplicationManifest>
-        <ApplicationIcon>..\MFAAvalonia\Assets\logo.ico</ApplicationIcon>
+        <!--
+            品牌图标：brands/<Brand>/logo.ico 存在时优先用品牌图标；
+            否则回退源码内默认图标（无品牌基线构建走这条）。
+            命令行 -p:ApplicationIcon=... 是全局属性，优先级更高，不会被这里覆盖
+            （MaaEOV 的 build_gui_mfa.sh 就是显式传它的）。
+            注意：窗口/任务栏图标不读这里，走 IconHelper —— 优先级为
+            interface.json 的 icon 字段 > 安装目录 Assets/logo.ico > 程序集内嵌资源。
+        -->
+        <ApplicationIcon Condition="'$(Brand)' != '' and Exists('$(BrandRoot)/logo.ico')">$(BrandRoot)/logo.ico</ApplicationIcon>
+        <ApplicationIcon Condition="'$(ApplicationIcon)' == ''">..\MFAAvalonia\Assets\logo.ico</ApplicationIcon>
         <CETCompat>false</CETCompat>
     </PropertyGroup>
 
@@ -33,6 +42,17 @@
         <BeautyOnPublishOnly>True</BeautyOnPublishOnly>
         <DebugType>none</DebugType>
         <DebugSymbols>false</DebugSymbols>
+    </PropertyGroup>
+
+    <!--
+        品牌化输出：-p:Brand=<X> 时产物落到 bin/<X>/<Configuration>/，
+        与「无品牌基线」目录 bin/AnyCPU/<Configuration>/ 物理分离。
+        后定义的属性覆盖前面的，故上面那组 OutputPath 保持原样即可 ——
+        「不传 Brand 则路径不变」这一向后兼容承诺靠它兑现。
+    -->
+    <PropertyGroup Condition="'$(Brand)' != ''">
+        <OutputPath>../bin/$(Brand)/$(Configuration)/</OutputPath>
+        <IntermediateOutputPath>obj/$(Brand)/$(Configuration)/$(TargetFramework)/</IntermediateOutputPath>
     </PropertyGroup>
 
     <ItemGroup Condition="'$(OS)' == 'Windows_NT'">

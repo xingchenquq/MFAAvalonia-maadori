@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    品牌化的编译期定义。
+
+    为什么放在 Directory.Build.targets 而不是 .props：
+      DefineConstants 的默认值（TRACE / NET / NET10_0 …）由 Microsoft.NET.Sdk
+      在**项目文件求值之后**才写入；在 .props 里追加会被随后整体覆盖，导致
+      #if BRAND_XXX 永远不成立。.targets 的导入时机在 SDK 默认值之后，追加有效。
+
+    不传 -p:Brand 时不注入任何 BRAND_*，纯上游基线构建的行为保持不变。
+  -->
+  <PropertyGroup Condition="'$(Brand)' != ''">
+    <DefineConstants>$(DefineConstants);BRAND_$([System.String]::Copy('$(Brand)').ToUpperInvariant())</DefineConstants>
+    <ProductBrand>$(Brand)</ProductBrand>
+  </PropertyGroup>
+</Project>

@@ -1,5 +1,30 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    品牌维度（Brand）。用法：dotnet build ... -p:Brand=Maadori
+    合法取值见 _BrandAllowed；不传 / 传空 = 纯上游基线构建，产物走 bin/AnyCPU/Release，
+    行为与引入品牌化之前完全一致。
+  -->
+  <PropertyGroup>
+    <Brand Condition="'$(Brand)' == ''"></Brand>
+    <_BrandAllowed>Maadori;Maaon;MaaEOV</_BrandAllowed>
+    <_BrandValid>false</_BrandValid>
+    <_BrandValid Condition="'$(Brand)' == ''">true</_BrandValid>
+    <_BrandValid Condition="'$(Brand)' != '' and $([System.String]::Copy(';$(_BrandAllowed);').Contains(';$(Brand);'))">true</_BrandValid>
+    <BrandRoot Condition="'$(Brand)' != ''">$(MSBuildThisFileDirectory)brands/$(Brand)</BrandRoot>
+  </PropertyGroup>
+
+  <!-- 品牌名进程序集元数据，供 BrandCapabilities 运行时读取 -->
+  <ItemGroup Condition="'$(Brand)' != ''">
+    <AssemblyMetadata Include="ProductBrand" Value="$(Brand)" />
+  </ItemGroup>
+
+  <!-- 非法 Brand 必须硬失败：静默产出到默认目录只会让品牌串味，且事后极难发现 -->
+  <Target Name="ValidateBrand" BeforeTargets="PrepareForBuild"
+          Condition="'$(Brand)' != '' and '$(_BrandValid)' != 'true'">
+    <Error Text="未知 Brand '$(Brand)'。可选值：$(_BrandAllowed)（不传 = 纯上游基线）" />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Packaging.Targets">
       <Version>0.1.232-*</Version>

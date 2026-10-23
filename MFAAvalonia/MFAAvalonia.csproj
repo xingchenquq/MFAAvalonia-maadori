@@ -14,6 +14,23 @@
         <DebugSymbols>false</DebugSymbols>
     </PropertyGroup>
 
+    <!--
+        品牌化中间产物与输出：不同品牌各自编译、各自落盘，互不覆盖。
+
+        为什么 OutputPath 也要品牌化：类库默认输出到共享位置
+        `MFAAvalonia/bin/<Configuration>/<TFM>/`，两个品牌交替构建时写同一份文件，
+        依赖增量判断的时机正确性 —— 只要有一次判定"输出已是最新"，就会把上一个
+        品牌的 Core.dll 复制进另一个品牌的包，且**文件大小完全相同，肉眼看不出来**。
+        分离后这条路径彻底消失。
+
+        刻意不碰 BaseIntermediateOutputPath —— 它会连带搬移 project.assets.json，
+        容易引发 restore 类疑难问题，收益不值。
+    -->
+    <PropertyGroup Condition="'$(Brand)' != ''">
+        <OutputPath>bin/$(Brand)/$(Configuration)/</OutputPath>
+        <IntermediateOutputPath>obj/$(Brand)/$(Configuration)/$(TargetFramework)/</IntermediateOutputPath>
+    </PropertyGroup>
+
     <ItemGroup>
         <Folder Include="Assets\Sound\" />
         <AvaloniaResource Include="Assets\logo.ico" />
