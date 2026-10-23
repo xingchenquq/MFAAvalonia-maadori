@@ -2,6 +2,11 @@
 
 本仓库是 [Maadori](https://github.com/xingchenquq/Maadori)（邦多利国服自动清火助手）所使用的图形界面外壳源码。
 
+> **本仓库只服务 Maadori。** 2026-10-23 起，MaaEOV / Maaon 各自使用项目内的
+> `vendor/MFAAvalonia` 独立副本（上游 tag，零共享），不再引用本仓库 ——
+> 否则会把 Maadori 的定制带进它们的产物，且它们的升级流程会切走本仓库的分支状态。
+> 多产品隔离的评估与演进见 [`docs/GUI多产品隔离设计-20261023.md`](docs/GUI多产品隔离设计-20261023.md)。
+
 Maadori 的分发包内含 `MFAAvalonia.Core.dll`（约 3.3 MB），是在上游 [MFAAvalonia](https://github.com/MaaXYZ/MFAAvalonia) 基础上定制编译的产物。按上游 **GPLv3** 许可要求，修改后的源码在此公开。
 
 ## 基线
@@ -38,10 +43,14 @@ Maadori 的分发包内含 `MFAAvalonia.Core.dll`（约 3.3 MB），是在上游
 ## 构建
 
 ```bash
-dotnet build MFAAvalonia.Desktop/MFAAvalonia.Desktop.csproj -c Release
+dotnet build MFAAvalonia.Desktop/MFAAvalonia.Desktop.csproj -c Release -p:Brand=Maadori
 ```
 
-产物在仓库根 `bin/AnyCPU/Release/`。
+产物在仓库根 `bin/Maadori/Release/`。
+
+> **2026-10-23 起产物按品牌分目录**（`-p:Brand=<Maadori|Maaon|MaaEOV>`）。
+> 不传 `Brand` 会落到 `bin/AnyCPU/Release/`，那是**纯上游基线**（不含本仓库的任何定制），
+> 只用于对照，不能拿来打 Maadori 的包。详见 [`docs/构建与品牌约定.md`](docs/构建与品牌约定.md)。
 
 **注意**：真正生效的程序集是 `MFAAvalonia.Core.dll`（约 3.3 MB）；`MFAAvalonia.dll`（约 179 KB）只是启动器壳。验证改动是否编译进去，必须搜前者。本地化资源在 `MFAAvalonia.Core.resources.dll`（按 `en-US/`、`ja-JP/`、`zh-Hant/` 分子目录），简体中文编进主 dll。
 
