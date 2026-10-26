@@ -1,5 +1,5 @@
 using Avalonia.Media;
-using MFAAvalonia.Extensions.MaaFW;
+using Avalonia.Threading;
 using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
@@ -62,12 +62,32 @@ public static class ActivityTitleWatcher
         }
     }
 
+    /// <summary>
+    /// 读文件（纯数据，只有字符串）→ **回到 UI 线程**构造画刷并写 ViewModel。
+    ///
+    /// 两步必须分开：Timer 回调跑在线程池上，而 Avalonia 属性变更与
+    /// <see cref="SolidColorBrush"/> 的构造都要求 UI 线程 —— 早先整段都在后台线程，
+    /// 结果被框架拦成 <c>Call from invalid thread</c>，标题纹丝不动（2026-10-26 实机）。
+    /// </summary>
     private static void Apply()
     {
         try
         {
-            var (text, brush) = Read();
-            Instances.RootViewModel.SetActivityTitle(text, brush);
+            var (text, colorHex) = Read();
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    IBrush? brush = Color.TryParse(colorHex, out var parsed)
+                        ? new SolidColorBrush(parsed)
+                        : null;
+                    Instances.RootViewModel.SetActivityTitle(text, brush);
+                }
+                catch (Exception ex)
+                {
+                    LoggerHelper.Warning($"活动标题应用失败：{ex.Message}");
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -75,26 +95,25 @@ public static class ActivityTitleWatcher
         }
     }
 
-    private static (string Text, IBrush? Brush) Read()
+    private static (string Text, string ColorHex) Read()
     {
         try
         {
             var file = Path.Combine(AppContext.BaseDirectory, FolderName, FileName);
-            if (!File.Exists(file)) return (string.Empty, null);
+            if (!File.Exists(file)) return (string.Empty, string.Empty);
 
             var json = JObject.Parse(File.ReadAllText(file));
             var text = (json["text"]?.ToString() ?? string.Empty).Trim();
-            if (text.Length == 0) return (string.Empty, null);
+            if (text.Length == 0) return (string.Empty, string.Empty);
 
             var color = (json["color"]?.ToString() ?? string.Empty).Trim();
-            IBrush? brush = Color.TryParse(color, out var parsed) ? new SolidColorBrush(parsed) : null;
-            return (text, brush);
+            return (text, color);
         }
         catch (Exception ex)
         {
             // 文件正在被写（半截 JSON）也算异常——静默降级，下次事件会再来一遍。
             LoggerHelper.Warning($"活动标题读取失败（本次不显示）：{ex.Message}");
-            return (string.Empty, null);
+            return (string.Empty, string.Empty);
         }
     }
 }
