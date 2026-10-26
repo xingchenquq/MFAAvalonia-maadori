@@ -2854,6 +2854,10 @@ public class MaaProcessor
         if (!string.IsNullOrWhiteSpace(customTitle) || !string.IsNullOrWhiteSpace(fallback))
             Instances.RootViewModel.ShowCustomTitleAndFallBack(customTitle, fallback);
 
+        // Maadori 定制（2026-10-26）：活动标题徽标。读 cache/title_status.json，
+        // 文件变更即刷新标题栏——agent 晚于 MFA 启动，靠 interface.json 只能显示上次的值。
+        ActivityTitleWatcher.Start();
+
         if (Interface != null)
         {
             AppendVersionLog(Interface.Version);

@@ -147,6 +147,26 @@ public partial class RootViewModel : ViewModelBase
 
     public void RefreshApplicationDisplayName() => OnPropertyChanged(nameof(ApplicationDisplayName));
 
+    /// <summary>
+    /// 活动标题徽标（Maadori 定制，2026-10-26）：标题栏 <c>custom_title</c> 后面的
+    /// 「当期活动名 · 剩余时间」，由 <see cref="MFAAvalonia.Helper.ActivityTitleWatcher"/>
+    /// 读 <c>cache/title_status.json</c> 后填充。空字符串 = 不显示。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsActivityTitleVisible))]
+    private string _activityTitle = string.Empty;
+
+    [ObservableProperty] private Avalonia.Media.IBrush? _activityTitleBrush;
+
+    public bool IsActivityTitleVisible => !string.IsNullOrWhiteSpace(ActivityTitle);
+
+    public void SetActivityTitle(string? text, Avalonia.Media.IBrush? brush)
+    {
+        ActivityTitle = text ?? string.Empty;
+        ActivityTitleBrush = brush;
+        OnPropertyChanged(nameof(IsActivityTitleVisible));
+    }
+
     [ObservableProperty] private bool _lockController;
 
     [ObservableProperty] private bool _isDebugMode = ConfigurationManager.Maa.GetValue(ConfigurationKeys.Recording, false)
