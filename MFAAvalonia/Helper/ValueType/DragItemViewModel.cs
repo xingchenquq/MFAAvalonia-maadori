@@ -1,4 +1,5 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using Avalonia.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
 using MFAAvalonia.Configuration;
 using MFAAvalonia.Extensions;
 using MFAAvalonia.Extensions.MaaFW;
@@ -35,6 +36,7 @@ public partial class DragItemViewModel : ObservableObject
         UpdateDisplayName();
         UpdateIconFromInterfaceItem();
         InitializeSupportStatus();
+        ApplyAvailability();
         LanguageHelper.LanguageChanged += OnLanguageChanged;
     }
 
@@ -61,6 +63,31 @@ public partial class DragItemViewModel : ObservableObject
     }
 
     [ObservableProperty] private string _name = string.Empty;
+
+    /// <summary>
+    /// 任务当前不可用：活动档期未开放（Maadori 定制，2026-10-26）。
+    ///
+    /// 数据由 <see cref="ActivityTitleWatcher"/> 从 ``cache/title_status.json`` 的
+    /// ``closed`` 列表读入并缓存在静态集合里；任务项在 UI 上表现为**变淡 + 删除线**。
+    /// 构造时自检一次，解决「任务列表被重载资源重建后标记丢失」的问题。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NameOpacity))]
+    [NotifyPropertyChangedFor(nameof(NameDecorations))]
+    [JsonIgnore]
+    private bool _isUnavailable;
+
+    /// <summary>不可用时整行变淡（0.4）；用透明度而不是写死灰色，深浅主题都合适。</summary>
+    public double NameOpacity => IsUnavailable ? 0.4 : 1.0;
+
+    public TextDecorationCollection? NameDecorations =>
+        IsUnavailable ? TextDecorations.Strikethrough : null;
+
+    private void ApplyAvailability()
+    {
+        if (InterfaceItem?.Entry is { } entry && ActivityTitleWatcher.IsClosed(entry))
+            IsUnavailable = true;
+    }
 
     /// <summary>验证不通过时标记为 true，用于 UI 红圈提示</summary>
     [ObservableProperty] [JsonIgnore] private bool _hasValidationError;

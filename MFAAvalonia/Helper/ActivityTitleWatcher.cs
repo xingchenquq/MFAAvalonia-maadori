@@ -2,7 +2,9 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 
 namespace MFAAvalonia.Helper;
@@ -24,6 +26,14 @@ public static class ActivityTitleWatcher
 
     /// <summary>文件写入常触发多次事件（大小 + 最后写入时间），300ms 内合并成一次。</summary>
     private const int DebounceMs = 300;
+
+    /// <summary>
+    /// 当前未开放的任务 entry（来自 title_status.json 的 closed 列表）。
+    /// task 列表项在构造时读它，所以「重载资源后重建的列表」也能带上标记。
+    /// </summary>
+    private static readonly HashSet<string> Closed = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsClosed(string entry) => Closed.Contains(entry);
 
     private static FileSystemWatcher? _watcher;
     private static Timer? _debounce;
@@ -73,7 +83,8 @@ public static class ActivityTitleWatcher
     {
         try
         {
-            var (text, colorHex) = Read();
+            var (text, colorHex, closed) = Read();
+            ApplyTaskAvailability(closed);
             Dispatcher.UIThread.Post(() =>
             {
                 try
@@ -95,25 +106,59 @@ public static class ActivityTitleWatcher
         }
     }
 
-    private static (string Text, string ColorHex) Read()
+    private static (string Text, string ColorHex, List<string> Closed) Read()
     {
         try
         {
             var file = Path.Combine(AppContext.BaseDirectory, FolderName, FileName);
-            if (!File.Exists(file)) return (string.Empty, string.Empty);
+            if (!File.Exists(file)) return (string.Empty, string.Empty, new List<string>());
 
             var json = JObject.Parse(File.ReadAllText(file));
             var text = (json["text"]?.ToString() ?? string.Empty).Trim();
-            if (text.Length == 0) return (string.Empty, string.Empty);
-
             var color = (json["color"]?.ToString() ?? string.Empty).Trim();
-            return (text, color);
+            var closed = json["closed"]?.Values<string>()
+                ?.Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v!.Trim())
+                .ToList() ?? new List<string>();
+            return text.Length == 0
+                ? (string.Empty, string.Empty, closed)
+                : (text, color, closed);
         }
         catch (Exception ex)
         {
             // 文件正在被写（半截 JSON）也算异常——静默降级，下次事件会再来一遍。
             LoggerHelper.Warning($"活动标题读取失败（本次不显示）：{ex.Message}");
-            return (string.Empty, string.Empty);
+            return (string.Empty, string.Empty, new List<string>());
         }
+    }
+
+    /// <summary>
+    /// 把 closed 列表落到任务列表上（UI 线程）。标记为不可用的任务在界面上变淡 + 加删除线。
+    ///
+    /// 只改视觉、不禁用勾选：真要强跑的用户还有 `activity.strict: false` 这条路，
+    /// 而任务入口的 ActivityGate 仍会在 3 秒内拦下未开放的任务。
+    /// </summary>
+    private static void ApplyTaskAvailability(List<string> closed)
+    {
+        Closed.Clear();
+        foreach (var entry in closed) Closed.Add(entry);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var task = Instances.InstanceTabBarViewModel.ActiveTab?.TaskQueueViewModel;
+                if (task == null) return;
+                foreach (var item in task.TaskItemViewModels)
+                {
+                    var entry = item.InterfaceItem?.Entry;
+                    item.IsUnavailable = !string.IsNullOrEmpty(entry) && Closed.Contains(entry);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerHelper.Warning($"任务可用性标记失败：{ex.Message}");
+            }
+        });
     }
 }

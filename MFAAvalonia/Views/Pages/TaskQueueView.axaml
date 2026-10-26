@@ -1247,7 +1247,9 @@
                                                    Text="{Binding Name}"
                                                    TextTrimming="CharacterEllipsis"
                                                    TextWrapping="NoWrap"
-                                                   VerticalAlignment="Center" />
+                                                   VerticalAlignment="Center"
+                                                   Opacity="{Binding NameOpacity}"
+                                                   TextDecorations="{Binding NameDecorations}" />
                                     </Grid>
                                     <TextBlock Grid.Column="2"
                                                Width="36"
