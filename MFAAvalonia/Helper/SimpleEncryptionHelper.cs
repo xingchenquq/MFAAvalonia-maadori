@@ -201,7 +201,12 @@ public static class SimpleEncryptionHelper
             }
             catch (Exception e)
             {
-                LoggerHelper.Warn("跨平台数据解密失败: " + e.Message);
+                // 2026-10-27 降级：这是**预期内**的路径——DPAPI 的
+                // CurrentUser 作用域只能在加密那台机器上解开，配置从别处
+                // 拷来/换了机器的用户必然走到这里，随后还有跨平台 AES 分支
+                // 兜底。此前记 Warn，每次启动刷 2 条（12 天 182 次），把真正
+                // 的故障信号埋了。改为 Debug 并写明来源不匹配的语义。
+                LoggerHelper.Debug($"跨平台数据解密未命中本机 DPAPI（字段来源不匹配，转 AES 兜底）: {e.Message}");
             }
         }
 

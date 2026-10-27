@@ -969,6 +969,11 @@ public static class AgentHelper
             LoggerHelper.Info("MaaTasker 已成功释放。");
         }
         catch (ObjectDisposedException) { LoggerHelper.Info("MaaTasker 已提前释放。"); }
+        // Agent 进程先退出时 Dispose 会抛 InvalidOperationException
+        // "No process is associated with this object."（进程句柄已失效）——
+        // 这是正常的收尾时序，不是故障（2026-10-27 实测 1 次/12 天，记 Warn 误导排查）。
+        // 注意顺序：ObjectDisposedException 派生自 InvalidOperationException，必须先捕获。
+        catch (InvalidOperationException e) { LoggerHelper.Info($"MaaTasker 释放跳过：进程已退出（{e.Message}）"); }
         catch (Exception e) { LoggerHelper.Warning($"释放 MaaTasker 失败：{e.Message}"); }
     }
 

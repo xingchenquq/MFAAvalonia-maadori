@@ -1003,7 +1003,10 @@ public static class VersionChecker
         if (File.Exists(changesPath))
             isFull = false;
         else
-            LoggerHelper.Error($"未找到 changes.json，无法执行增量更新：文件={changesPath}");
+            // 本项目资源包按**全量**分发，不含 changes.json 是正常形态，
+            // 落这里就走全量更新（删除+重写全部资源）。原记 Error，每次
+            // 更新都让用户以为失败了（12 天 5 次），2026-10-27 降为 Info。
+            LoggerHelper.Info("资源包内无 changes.json（全量包形态），按全量更新处理");
         LogResourceUpdateDebugSummary(
             "validated",
             latestVersion,
