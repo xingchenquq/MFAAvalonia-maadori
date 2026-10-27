@@ -1555,6 +1555,17 @@ public class MaaProcessor
                 return InitializeController(ViewModel?.CurrentController ?? MaaControllerTypes.Adb, logConfig: false);
             }, token: token, name: "截图控制器检测", catchException: true, shouldLog: false, noMessage: true);
 
+            // 设备尚未枚举时 InitializeController 会提前返回 null（2026-10-27 的
+            // AdbSerial 空值守卫）。此处必须判空：下面紧接着就调
+            // controller.SetOption_*，否则 NullReferenceException 会把
+            // 「设备未就绪」伪装成「截图控制器初始化失败」，比原来的
+            // ArgumentException 更难查。
+            if (controller == null)
+            {
+                LoggerHelper.Warning("截图控制器未就绪（设备尚未枚举），本次跳过");
+                return null;
+            }
+
             var displayShortSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayShortSide;
             var displayLongSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayLongSide;
             var displayRaw = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayRaw;
@@ -1653,6 +1664,17 @@ public class MaaProcessor
                 token.ThrowIfCancellationRequested();
                 return InitializeController(ViewModel?.CurrentController ?? MaaControllerTypes.Adb, logConfig: false);
             }, token: token, name: "截图控制器检测", catchException: true, shouldLog: false, noMessage: true);
+
+            // 设备尚未枚举时 InitializeController 会提前返回 null（2026-10-27 的
+            // AdbSerial 空值守卫）。此处必须判空：下面紧接着就调
+            // controller.SetOption_*，否则 NullReferenceException 会把
+            // 「设备未就绪」伪装成「截图控制器初始化失败」，比原来的
+            // ArgumentException 更难查。
+            if (controller == null)
+            {
+                LoggerHelper.Warning("截图控制器未就绪（设备尚未枚举），本次跳过");
+                return null;
+            }
 
             var displayShortSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayShortSide;
             var displayLongSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayLongSide;
@@ -2354,6 +2376,20 @@ public class MaaProcessor
                     LoggerHelper.Info($"截图模式：{Config.AdbDevice.ScreenCap}");
                     LoggerHelper.Info($"输入模式：{Config.AdbDevice.Input}");
                     LoggerHelper.Info($"控制器配置：{Config.AdbDevice.Config}");
+                }
+
+                // 设备未就绪守卫（2026-10-27）：模拟器尚在启动、adb devices 还没
+                // 枚举到它时，AdbSerial 为空是**预期内状态**，而不是故障。此前会
+                // 直接拿去构造 MaaAdbController，被基类 ThrowIfNullOrEmpty 拦下抛
+                // ArgumentException，再被外层 catch 记成 ERR「控制器初始化失败」，
+                // 白烧一次连接尝试（10-27 09:00:05 实测）。
+                // 外层已有 20 秒重试窗口且把 null 当「中止本次尝试、继续轮询」处理
+                // （见 MaaProcessor.InitializeMaaTasker 的 controller == null 分支），
+                // 所以这里提前返回 null 即可——语义比抛异常准确，日志也降为 WRN。
+                if (string.IsNullOrWhiteSpace(Config.AdbDevice.AdbSerial))
+                {
+                    LoggerHelper.Warning("ADB 连接目标为空，跳过本次控制器构造，等待设备枚举后重试。");
+                    return null;
                 }
 
                 return new MaaAdbController(
