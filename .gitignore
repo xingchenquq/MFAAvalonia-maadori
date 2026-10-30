@@ -24,7 +24,10 @@ build_output.txt
 /plans/
 /test_interface/
 
-# Local-only verification project
-/MFAAvalonia.Tests/
+# 测试项目必须进版本控制，否则 CI 永远跑不到（2026-10-30 起）
+# 曾排除 /MFAAvalonia.Tests/ —— 那等于让「零测试」变成制度，已删除该规则。
 /MFAAvalonia/AssemblyInfo.cs
 workflows/android/__pycache__/mfa_android_agent.cpython-312.pyc
+
+# Agent 工作记录（本地会话数据，不随仓库分发）
+.workbuddy/

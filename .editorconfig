@@ -1,0 +1,47 @@
+root = true
+
+# 轻量护栏：只统一格式，不启用任何 analyzer 严重级别。
+#
+# 为什么全用 suggestion：仓库里存量代码有 59 处修饰符顺序不一致、15 处 async void、
+# 40 处 .Wait()/Result。一次把规则升到 warning 会刷出几百条，团队的第一反应必然是
+# 关掉规则。先让 IDE 给出灰色提示、新代码自动对齐，等存量清完了再谈升 warning。
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+# 刻意不设 trim_trailing_whitespace：这个仓库是 fork，要频繁跟上游合并。
+# 开了它，IDE 下次保存就会清理全仓库的末尾空格，产生成千行与逻辑无关的 diff，
+# 把上游合并冲突放大到无法阅读。要清存量就单独提一个纯空白 commit，别混在日常改动里。
+
+[*.{yml,yaml,json,jsonc,axaml,xml,csproj,props,targets}]
+indent_size = 2
+
+[*.cs]
+# 修饰符顺序：public static async Task，而不是 public async static Task
+# （存量里两种写法并存，新代码按这个来）
+csharp_preferred_modifier_order = public, private, protected, internal, file, static, extern, new, virtual, abstract, sealed, override, readonly, unsafe, required, volatile, async:suggestion
+
+# 控制语句必须带大括号（单行 if 改动时最容易引入缩进错误）
+csharp_prefer_braces = true:suggestion
+
+# this. 一律省略
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+
+# 内置类型用关键字（int 而非 Int32），但 var 保留给明显的场景
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+
+# using 排序 + 去掉多余的 using，新文件保存时自动整理
+dotnet_sort_system_directives_first = true
+
+# 已知噪声：这三条在存量代码里大量出现且无实际收益，显式静默，
+# 避免 IDE 提示疲劳盖住真正的问题。
+dotnet_diagnostic.IDE0058.severity = none
+dotnet_diagnostic.IDE0011.severity = none
+dotnet_diagnostic.IDE1006.severity = none
+
+# 测试项目允许所有命名风格（xunit 方法名就是长句子）
+[MFAAvalonia.Tests/**/*.cs]
+dotnet_diagnostic.IDE1006.severity = none

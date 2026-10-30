@@ -1,4 +1,10 @@
-name: Cross-Platform Release
+name: Release (v* tag)
+
+# 与 Test.yml 曾是同名 workflow，GitHub Actions 页面上完全分不清（2026-10-30 改）。
+# 两者职责高度重叠（都是 6 平台矩阵构建 + 打 zip + 发 release），区别只有：
+#   Release.yml 触发 v* tag，带 changelog 与 Android shell 构建
+#   Test.yml    触发 t* tag，job 更少（历史遗留链路）
+# 后续应合并成一个 workflow，用 tag 前缀区分发版类型。
 
 on:
   push:
@@ -124,7 +130,9 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-          config-file: NuGet.config
+          # 曾传 config-file: NuGet.config —— 该文件在仓库里从未存在过（git log 可查），
+          # setup-dotnet 会抛 "The specified config file does not exist" 直接让 job 失败。
+          # 2026-10-30 移除，走 nuget.org 默认源。
 
       - name: Restore Dependencies
         run: dotnet restore MFAAvalonia.Desktop/MFAAvalonia.Desktop.csproj
@@ -204,7 +212,9 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-          config-file: NuGet.config
+          # 曾传 config-file: NuGet.config —— 该文件在仓库里从未存在过（git log 可查），
+          # setup-dotnet 会抛 "The specified config file does not exist" 直接让 job 失败。
+          # 2026-10-30 移除，走 nuget.org 默认源。
 
       - name: Install .NET Android workload
         run: dotnet workload install android --skip-manifest-update

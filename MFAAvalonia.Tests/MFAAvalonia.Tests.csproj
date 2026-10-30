@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    自研代码的回归网。
+
+    只测「纯逻辑、不碰 UI 线程 / 不碰 native」的部分：能安全跑在 CI 的
+    无显示环境里，也不需要模拟器。目标不是覆盖率，是让 `dotnet test`
+    成为一道闸 —— 在此之前 6.6 万行自研代码没有任何自动化验证。
+
+    明确不测的东西（属于集成测试范畴，另设项目再谈）：
+      - MaaProcessor / MaaProcessorManager（静态字段会构造 MaaToolkit，加载 native）
+      - 任何 View / ViewModel（Avalonia 需要一个能跑的 UI 线程）
+      - ActivityTitleWatcher（依赖文件系统事件 + Dispatcher）
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>annotations</Nullable>
+    <LangVersion>14</LangVersion>
+    <NoWarn>NU1701;NU1510</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.0.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MFAAvalonia\MFAAvalonia.csproj" />
+  </ItemGroup>
+
+</Project>

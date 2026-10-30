@@ -1,4 +1,8 @@
-﻿name: Cross-Platform Release
+﻿name: Build & Release (t* tag)
+
+# 此文件曾与 Release.yml 同名（都叫 Cross-Platform Release），页面上无法区分。
+# 注意：它**不跑任何测试** —— 名字里的 Test 指 t* tag 触发，不是单元测试。
+# 真正的测试在 Tests.yml。后续应把本文件合并进 Release.yml（2026-10-30）。
 
 on:
   push:
@@ -102,7 +106,9 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-          config-file: NuGet.config
+          # 曾传 config-file: NuGet.config —— 该文件在仓库里从未存在过（git log 可查），
+          # setup-dotnet 会抛 "The specified config file does not exist" 直接让 job 失败。
+          # 2026-10-30 移除，走 nuget.org 默认源。
 
       - name: Restore Dependencies
         run: dotnet restore

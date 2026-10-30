@@ -1,0 +1,51 @@
+name: Tests
+
+# 自研代码的回归闸。
+#
+# 为什么单独一个 workflow：Release.yml / Test.yml 都是「6 平台矩阵构建 + 打 zip」，
+# 每个平台都跑一遍测试纯属浪费。这里只做两件快事 —— 跑单元测试、确认品牌化构建仍然编译。
+#
+# 在此之前 MFAAvalonia.Tests 被写进了 .gitignore，等于「零测试」是制度而不是疏忽。
+# 2026-10-30 起强制：任何 PR 都必须过这一步。
+
+on:
+  push:
+    branches:
+      - master
+      - maadori-custom
+  pull_request:
+    branches:
+      - master
+      - maadori-custom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit Tests (net10.0)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          # 刻意不传 config-file：仓库里没有 NuGet.config，
+          # 现有 Release.yml / Test.yml 传了它，setup-dotnet 会因找不到文件而失败。
+
+      - name: Restore
+        run: dotnet restore MFAAvalonia.Tests/MFAAvalonia.Tests.csproj
+
+      - name: Run unit tests
+        run: dotnet test MFAAvalonia.Tests/MFAAvalonia.Tests.csproj -c Release --no-restore
+
+      # 测试只覆盖纯逻辑；这一行确保品牌化构建没被改坏
+      # （-p:Brand 会改 OutputPath / IntermediateOutputPath / DefineConstants，
+      #   改错时普通 build 仍然能过，只有带 Brand 才会暴露）
+      - name: Brand build compiles
+        run: dotnet build MFAAvalonia.Desktop/MFAAvalonia.Desktop.csproj -c Release -p:Brand=Maadori
