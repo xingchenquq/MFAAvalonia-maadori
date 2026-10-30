@@ -1538,6 +1538,45 @@ public class MaaProcessor
 
     #region MaaTasker初始化
 
+    /// <summary>
+    /// 截图控制器是否可用。<see cref="InitializeController"/> 在「设备尚未枚举」时会提前
+    /// 返回 null（见其中的 AdbSerial 守卫），这时必须停下：调用方紧接着就要
+    /// <c>controller.SetOption_*</c>，NRE 会把「设备未就绪」伪装成
+    /// 「截图控制器初始化失败」，比原来的异常更难查。
+    ///
+    /// 两个截图初始化路径（独立截图 tasker / 截图控制器）此前各自复制了同一段判断，
+    /// 改一处漏一处 —— 2026-10-30 抽出。
+    /// </summary>
+    private bool IsScreenshotControllerUsable(MaaController? controller)
+    {
+        if (controller != null) return true;
+
+        LoggerHelper.Warning("截图控制器未就绪（设备尚未枚举），本次跳过");
+        return false;
+    }
+
+    /// <summary>
+    /// 把 interface.json 里 controller 段的截图分辨率选项套到 controller 上。
+    ///
+    /// 三个 Display* 字段互斥（长边 / 短边 / 原始尺寸），各分支都要求其余两个为空。
+    /// 原先每处写三遍 <c>Find(...)</c>，同一集合查三次；合并成一次查询，语义不变。
+    /// </summary>
+    private void ApplyScreenshotSizeOptions(MaaController controller)
+    {
+        var controllerKey = ViewModel?.CurrentController.ToJsonKey();
+        var match = Interface?.Controller?.Find(
+            c => c.Type != null && c.Type.Equals(controllerKey, StringComparison.OrdinalIgnoreCase));
+
+        if (match == null) return;
+
+        if (match.DisplayLongSide != null && match.DisplayShortSide == null && match.DisplayRaw == null)
+            controller.SetOption_ScreenshotTargetLongSide(Convert.ToInt32(match.DisplayLongSide.Value));
+        if (match.DisplayShortSide != null && match.DisplayLongSide == null && match.DisplayRaw == null)
+            controller.SetOption_ScreenshotTargetShortSide(Convert.ToInt32(match.DisplayShortSide.Value));
+        if (match.DisplayRaw != null && match.DisplayShortSide == null && match.DisplayLongSide == null)
+            controller.SetOption_ScreenshotUseRawSize(match.DisplayRaw.Value);
+    }
+
     private async Task<IMaaController?> InitializeScreenshotControllerAsync(CancellationToken token)
     {
         if (!UseSeparateScreenshotTasker)
@@ -1555,27 +1594,10 @@ public class MaaProcessor
                 return InitializeController(ViewModel?.CurrentController ?? MaaControllerTypes.Adb, logConfig: false);
             }, token: token, name: "截图控制器检测", catchException: true, shouldLog: false, noMessage: true);
 
-            // 设备尚未枚举时 InitializeController 会提前返回 null（2026-10-27 的
-            // AdbSerial 空值守卫）。此处必须判空：下面紧接着就调
-            // controller.SetOption_*，否则 NullReferenceException 会把
-            // 「设备未就绪」伪装成「截图控制器初始化失败」，比原来的
-            // ArgumentException 更难查。
-            if (controller == null)
-            {
-                LoggerHelper.Warning("截图控制器未就绪（设备尚未枚举），本次跳过");
+            if (!IsScreenshotControllerUsable(controller))
                 return null;
-            }
 
-            var displayShortSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayShortSide;
-            var displayLongSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayLongSide;
-            var displayRaw = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayRaw;
-
-            if (displayLongSide != null && displayShortSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetLongSide(Convert.ToInt32(displayLongSide.Value));
-            if (displayShortSide != null && displayLongSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetShortSide(Convert.ToInt32(displayShortSide.Value));
-            if (displayRaw != null && displayShortSide == null && displayLongSide == null)
-                controller.SetOption_ScreenshotUseRawSize(displayRaw.Value);
+            ApplyScreenshotSizeOptions(controller!);
         }
         catch (Exception ex)
         {
@@ -1665,27 +1687,10 @@ public class MaaProcessor
                 return InitializeController(ViewModel?.CurrentController ?? MaaControllerTypes.Adb, logConfig: false);
             }, token: token, name: "截图控制器检测", catchException: true, shouldLog: false, noMessage: true);
 
-            // 设备尚未枚举时 InitializeController 会提前返回 null（2026-10-27 的
-            // AdbSerial 空值守卫）。此处必须判空：下面紧接着就调
-            // controller.SetOption_*，否则 NullReferenceException 会把
-            // 「设备未就绪」伪装成「截图控制器初始化失败」，比原来的
-            // ArgumentException 更难查。
-            if (controller == null)
-            {
-                LoggerHelper.Warning("截图控制器未就绪（设备尚未枚举），本次跳过");
+            if (!IsScreenshotControllerUsable(controller))
                 return null;
-            }
 
-            var displayShortSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayShortSide;
-            var displayLongSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayLongSide;
-            var displayRaw = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayRaw;
-
-            if (displayLongSide != null && displayShortSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetLongSide(Convert.ToInt32(displayLongSide.Value));
-            if (displayShortSide != null && displayLongSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetShortSide(Convert.ToInt32(displayShortSide.Value));
-            if (displayRaw != null && displayShortSide == null && displayLongSide == null)
-                controller.SetOption_ScreenshotUseRawSize(displayRaw.Value);
+            ApplyScreenshotSizeOptions(controller!);
         }
         catch (Exception ex)
         {
@@ -1860,16 +1865,7 @@ public class MaaProcessor
                 return (null, InvalidResource, ShouldRetry);
             }
 
-            var displayShortSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayShortSide;
-
-            var displayLongSide = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayLongSide;
-            var displayRaw = Interface?.Controller?.Find(c => c.Type != null && c.Type.Equals(ViewModel?.CurrentController.ToJsonKey(), StringComparison.OrdinalIgnoreCase))?.DisplayRaw;
-            if (displayLongSide != null && displayShortSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetLongSide(Convert.ToInt32(displayLongSide.Value));
-            if (displayShortSide != null && displayLongSide == null && displayRaw == null)
-                controller.SetOption_ScreenshotTargetShortSide(Convert.ToInt32(displayShortSide.Value));
-            if (displayRaw != null && displayShortSide == null && displayLongSide == null)
-                controller.SetOption_ScreenshotUseRawSize(displayRaw.Value);
+            ApplyScreenshotSizeOptions(controller);
         }
         catch (OperationCanceledException)
         {
