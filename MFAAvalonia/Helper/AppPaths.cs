@@ -18,6 +18,14 @@ public static class AppPaths
         : _configDirectory;
     public static string InstancesDirectory => Path.Combine(ConfigDirectory, "instances");
     public static string ResourceDirectory => Path.Combine(DataRoot, "resource");
+
+    /// <summary>
+    /// 运行时交换目录。agent 等子进程通过写这里的文件把状态回传给 GUI
+    /// （例：<c>cache/title_status.json</c> 驱动标题栏活动徽标）。
+    /// 统一走 <see cref="DataRoot"/>，不要各处硬拼 <see cref="AppContext.BaseDirectory"/>，
+    /// 否则独立数据目录生效时会读错位置。
+    /// </summary>
+    public static string CacheDirectory => Path.Combine(DataRoot, "cache");
     public static string AgentDirectory => Path.Combine(DataRoot, "agent");
     public static string LogsDirectory => string.IsNullOrWhiteSpace(_logsDirectory)
         ? Path.Combine(InstallRoot, "logs")

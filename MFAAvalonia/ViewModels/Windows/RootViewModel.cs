@@ -162,9 +162,11 @@ public partial class RootViewModel : ViewModelBase
 
     public void SetActivityTitle(string? text, Avalonia.Media.IBrush? brush)
     {
+        // 不要再手动 OnPropertyChanged(IsActivityTitleVisible)：ActivityTitle 的
+        // [NotifyPropertyChangedFor] 已经覆盖，重复通知会让绑定多求值一次。
+        // 值未变时生成器不通知，可见性本来也不会变。
         ActivityTitle = text ?? string.Empty;
         ActivityTitleBrush = brush;
-        OnPropertyChanged(nameof(IsActivityTitleVisible));
     }
 
     [ObservableProperty] private bool _lockController;

@@ -315,6 +315,10 @@ public partial class App : Application
         }
         GlobalHotkeyService.Shutdown();
 
+        // 停掉活动标题的文件监听与防抖定时器：静态持有的 FileSystemWatcher / Timer
+        // 不释放的话，「重启 GUI」这类操作会留下失效的 watcher（2026-10-30）
+        ActivityTitleWatcher.Stop();
+
         // 强制清理所有应用资源（包括字体）
         ForceCleanupAllResources();
 
